@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "concurrently \"npm run server\" \"npm run client\"",
     "server": "node ./src/server.cjs",
-    "client": "vite",
+    "client": "vite --host",
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview"
