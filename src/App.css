@@ -40,3 +40,16 @@
 .read-the-docs {
   color: #888;
 }
+
+
+@keyframes running-light {
+  0% { box-shadow: 0 0 0 0 #38bdf8, 0 0 0 0 #f472b6; }
+  50% { box-shadow: 0 0 30px 10px #38bdf8, 0 0 30px 10px #f472b6; }
+  100% { box-shadow: 0 0 0 0 #38bdf8, 0 0 0 0 #f472b6; }
+}
+.flashing-title {
+  animation: running-light 1.5s infinite;
+  border-width: 6px;
+  border-style: solid;
+  border-image: linear-gradient(90deg, #38bdf8, #f472b6, #38bdf8) 1;
+}

@@ -12,13 +12,19 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@react-pdf/renderer": "^4.3.0",
     "@tailwindcss/vite": "^4.1.8",
     "axios": "^1.9.0",
+    "buffer": "^6.0.3",
     "cors": "^2.8.5",
     "express": "^5.1.0",
+    "jsbarcode": "^3.12.1",
+    "lodash.debounce": "^4.0.8",
     "pg": "^8.16.0",
+    "qz-tray": "^2.2.5",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "react-dom": "^19.1.0",
+    "react-to-print": "^3.1.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.25.0",
