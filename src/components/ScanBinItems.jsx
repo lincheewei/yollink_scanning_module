@@ -163,9 +163,7 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
 
     const newComponents = [...scannedComponents, componentId.trim()];
     setScannedComponents(newComponents);
-    
-    const idx = newComponents.length - 1;
-    await fetchScaleReading(componentId.trim(), idx);
+  
     
     setMessage("");
   };
