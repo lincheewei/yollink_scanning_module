@@ -450,41 +450,45 @@ const fetchScaleReading = async (componentId, idx) => {
                             </div>
 
                             {/* Weight Information - Read Only in Review Mode */}
-                            <div className={`border rounded p-3 ${ready ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
-                              <h5 className={`text-xs font-semibold mb-2 ${ready ? 'text-green-700' : 'text-red-700'}`}>
-                                {ready ? '✅ Weight Information Confirmed:' : '⚠️ Weight Information Missing:'}
-                              </h5>
-                              {ready ? (
-                                <div className="space-y-1 text-xs">
-                                  <div className="flex justify-between">
-                                    <span className="text-gray-600">Unit Weight:</span>
-                                    <span className="font-semibold">
-                                      {componentData[idx].unit_weight_g ? `${componentData[idx].unit_weight_g}g` : "N/A"}
-                                    </span>
-                                  </div>
-                                  <div className="flex justify-between">
-                                    <span className="text-gray-600">Quantity:</span>
-                                    <span className="font-semibold">
-                                      {componentData[idx].pcs ? `${componentData[idx].pcs} pcs` : "N/A"}
-                                    </span>
-                                  </div>
-                                  <div className="flex justify-between">
-                                    <span className="text-gray-600">Total Weight:</span>
-                                    <span className="font-semibold">
-                                      {componentData[idx].net_kg ? `${componentData[idx].net_kg}kg` : "N/A"}
-                                    </span>
-                                  </div>
-                                  <div className="flex justify-between">
-                                    <span className="text-gray-600">Scale Serial:</span>
-                                    <span className="font-semibold text-xs">
-                                      {componentData[idx].serial_no || "N/A"}
-                                    </span>
-                                  </div>
-                                </div>
-                              ) : (
-                                <span className="text-xs text-red-600">Scale reading required before saving</span>
-                              )}
-                            </div>
+                          {/* Weight Information - Read Only in Review Mode */}
+<div className={`border rounded p-3 ${ready ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
+  <h5 className={`text-xs font-semibold mb-2 ${ready ? 'text-green-700' : 'text-red-700'}`}>
+    {ready ? '✅ Weight Information Confirmed:' : '⚠️ Weight Information Missing:'}
+  </h5>
+  {ready ? (
+    <div className="space-y-2 text-sm"> {/* Increased font size to text-sm */}
+      <div className="flex justify-between">
+        <span className="text-gray-600 font-medium">Unit Weight:</span>
+        <span className="font-semibold">
+          {componentData[idx].unit_weight_g != null
+            ? `${componentData[idx].unit_weight_g}g`
+            : "N/A"
+          }
+        </span>
+      </div>
+      <div className="flex justify-between">
+        <span className="text-gray-600 font-medium">Quantity:</span>
+        <span className="font-semibold">
+          {componentData[idx].pcs != null
+            ? `${componentData[idx].pcs} pcs`
+            : "N/A"
+          }
+        </span>
+      </div>
+      <div className="flex justify-between">
+        <span className="text-gray-600 font-medium">Total Weight:</span>
+        <span className="font-semibold">
+          {componentData[idx].net_kg != null
+            ? `${componentData[idx].net_kg}kg`
+            : "N/A"
+          }
+        </span>
+      </div>
+    </div>
+  ) : (
+    <span className="text-xs text-red-600">Scale reading required before saving</span>
+  )}
+</div>
                           </div>
                         </div>
                       </div>
