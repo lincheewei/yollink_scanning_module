@@ -78,7 +78,7 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
     }
 
     try {
-      const response = await axios.get("/api/scale-reading");
+const response = await axios.get("http://localhost:8000/get_weight");
       const scaleData = response.data;
 
       setComponentData(prev => ({
