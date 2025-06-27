@@ -16,6 +16,9 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
   const componentInputRef = useRef(null);
   const jtcInputRef = useRef(null);
 
+  // Helper to check positive number
+  const isPositiveNumber = (val) => typeof val === "number" && val > 0;
+
   // Expose reset function to parent
   useImperativeHandle(ref, () => ({
     resetComponent: () => {
@@ -42,19 +45,25 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
     }
   }, [currentStep]);
 
-  // Check if all components have scale readings
+  // Check if all components have valid scale readings (all > 0)
   const allComponentsHaveScaleReadings = () => {
-    return scannedComponents.length > 0 && scannedComponents.every((_, idx) => 
-      componentData[idx] && 
-      !componentData[idx].loading && 
-      componentData[idx].net_kg !== null
-    );
+    return scannedComponents.length > 0 && scannedComponents.every((_, idx) => {
+      const data = componentData[idx];
+      return data && !data.loading &&
+        isPositiveNumber(data.net_kg) &&
+        isPositiveNumber(data.pcs) &&
+        isPositiveNumber(data.unit_weight_g);
+    });
   };
 
   // Helper for readiness count
-  const readyCount = scannedComponents.filter((_, idx) => 
-    componentData[idx] && !componentData[idx].loading && componentData[idx].net_kg !== null
-  ).length;
+  const readyCount = scannedComponents.filter((_, idx) => {
+    const data = componentData[idx];
+    return data && !data.loading &&
+      isPositiveNumber(data.net_kg) &&
+      isPositiveNumber(data.pcs) &&
+      isPositiveNumber(data.unit_weight_g);
+  }).length;
 
   const fetchScaleReading = async (componentId, idx) => {
     if (!componentData[idx]) {
@@ -101,19 +110,21 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
       const scaleData = response.data;
 
       // Validate scaleData fields
-      const isValidWeight = typeof scaleData.net_kg === "number" && scaleData.net_kg > 0;
+      const validNetKg = isPositiveNumber(scaleData.net_kg) ? scaleData.net_kg : null;
+      const validPcs = isPositiveNumber(scaleData.pcs) ? scaleData.pcs : null;
+      const validUnitWeight = isPositiveNumber(scaleData.unit_weight_g) ? scaleData.unit_weight_g : null;
 
       setComponentData(prev => ({
         ...prev,
         [idx]: {
           componentId,
           loading: false,
-          net_kg: isValidWeight ? scaleData.net_kg : null,
-          pcs: scaleData.pcs != null ? scaleData.pcs : null,
-          unit_weight_g: scaleData.unit_weight_g != null ? scaleData.unit_weight_g : null,
+          net_kg: validNetKg,
+          pcs: validPcs,
+          unit_weight_g: validUnitWeight,
           timestamp: scaleData.timestamp || null,
           serial_no: scaleData.serial_no || null,
-          error: isValidWeight ? null : "Invalid weight reading"
+          error: (validNetKg && validPcs && validUnitWeight) ? null : "Invalid weight reading"
         }
       }));
     } catch (error) {
@@ -404,7 +415,11 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
                 </h3>
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   {scannedComponents.map((component, idx) => {
-                    const ready = componentData[idx] && !componentData[idx].loading && componentData[idx].net_kg !== null;
+                    const data = componentData[idx];
+                    const ready = data && !data.loading &&
+                      isPositiveNumber(data.net_kg) &&
+                      isPositiveNumber(data.pcs) &&
+                      isPositiveNumber(data.unit_weight_g);
                     return (
                       <div key={idx} className="bg-white border rounded-lg p-4 shadow-sm hover:shadow-md transition-shadow">
                         <div className="flex items-center gap-4">
@@ -459,8 +474,8 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
                                   <div className="flex justify-between">
                                     <span className="text-gray-600 font-medium">Unit Weight:</span>
                                     <span className="font-semibold">
-                                      {componentData[idx].unit_weight_g != null
-                                        ? `${componentData[idx].unit_weight_g}g`
+                                      {data.unit_weight_g != null
+                                        ? `${data.unit_weight_g}g`
                                         : "N/A"
                                       }
                                     </span>
@@ -468,8 +483,8 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
                                   <div className="flex justify-between">
                                     <span className="text-gray-600 font-medium">Quantity:</span>
                                     <span className="font-semibold">
-                                      {componentData[idx].pcs != null
-                                        ? `${componentData[idx].pcs} pcs`
+                                      {data.pcs != null
+                                        ? `${data.pcs} pcs`
                                         : "N/A"
                                       }
                                     </span>
@@ -477,8 +492,8 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
                                   <div className="flex justify-between">
                                     <span className="text-gray-600 font-medium">Total Weight:</span>
                                     <span className="font-semibold">
-                                      {componentData[idx].net_kg != null
-                                        ? `${componentData[idx].net_kg}kg`
+                                      {data.net_kg != null
+                                        ? `${data.net_kg}kg`
                                         : "N/A"
                                       }
                                     </span>
@@ -559,7 +574,11 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
               </h3>
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {scannedComponents.map((component, idx) => {
-                  const ready = componentData[idx] && !componentData[idx].loading && componentData[idx].net_kg !== null;
+                  const data = componentData[idx];
+                  const ready = data && !data.loading &&
+                    isPositiveNumber(data.net_kg) &&
+                    isPositiveNumber(data.pcs) &&
+                    isPositiveNumber(data.unit_weight_g);
                   return (
                     <div key={idx} className="bg-white border rounded-lg p-4 shadow-sm hover:shadow-md transition-shadow">
                       <div className="flex items-center gap-4">
@@ -615,7 +634,7 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
                           {/* Weight Information */}
                           <div className="bg-gray-50 border border-gray-200 rounded p-3">
                             <h5 className="text-xs font-semibold text-gray-600 mb-2">Weight Information:</h5>
-                            {componentData[idx]?.loading ? (
+                            {data?.loading ? (
                               <div className="flex items-center">
                                 <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-2"></div>
                                 <span className="text-sm text-blue-600">Reading...</span>
@@ -625,8 +644,8 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
                                 <div className="flex justify-between">
                                   <span className="text-gray-600 font-medium">Unit Weight:</span>
                                   <span className="font-semibold">
-                                    {componentData[idx].unit_weight_g != null
-                                      ? `${componentData[idx].unit_weight_g}g`
+                                    {data.unit_weight_g != null
+                                      ? `${data.unit_weight_g}g`
                                       : "N/A"
                                     }
                                   </span>
@@ -634,8 +653,8 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
                                 <div className="flex justify-between">
                                   <span className="text-gray-600 font-medium">Quantity:</span>
                                   <span className="font-semibold">
-                                    {componentData[idx].pcs != null
-                                      ? `${componentData[idx].pcs} pcs`
+                                    {data.pcs != null
+                                      ? `${data.pcs} pcs`
                                       : "N/A"
                                     }
                                   </span>
@@ -643,8 +662,8 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
                                 <div className="flex justify-between">
                                   <span className="text-gray-600 font-medium">Total Weight:</span>
                                   <span className="font-semibold">
-                                    {componentData[idx].net_kg != null
-                                      ? `${componentData[idx].net_kg}kg`
+                                    {data.net_kg != null
+                                      ? `${data.net_kg}kg`
                                       : "N/A"
                                     }
                                   </span>
@@ -657,16 +676,16 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
                             <div className="mt-3">
                               <button
                                 onClick={() => fetchScaleReading(component, idx)}
-                                disabled={componentData[idx]?.loading}
+                                disabled={data?.loading}
                                 className={`w-full px-3 py-2 rounded transition-colors text-xs ${
-                                  componentData[idx]?.loading
+                                  data?.loading
                                     ? "bg-gray-300 text-gray-500 cursor-not-allowed"
                                     : ready
                                     ? "bg-green-600 text-white hover:bg-green-700"
                                     : "bg-blue-600 text-white hover:bg-blue-700"
                                 }`}
                               >
-                                {componentData[idx]?.loading 
+                                {data?.loading 
                                   ? "Reading..." 
                                   : ready
                                   ? "✅ Reading Complete"
