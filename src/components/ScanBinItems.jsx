@@ -56,45 +56,32 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
     componentData[idx] && !componentData[idx].loading && componentData[idx].net_kg !== null
   ).length;
 
-  const fetchScaleReading = async (componentId, idx) => {
-    if (!componentData[idx]) {
-      setComponentData(prev => ({
-        ...prev,
-        [idx]: { 
-          componentId, 
-          loading: true, 
-          net_kg: null, 
-          pcs: null, 
-          unit_weight_g: null,
-          timestamp: null,
-          serial_no: null
-        }
-      }));
-    } else {
-      setComponentData(prev => ({
-        ...prev,
-        [idx]: { ...prev[idx], loading: true }
-      }));
-    }
+const fetchScaleReading = async (componentId, idx) => {
+  if (!componentData[idx]) {
+    setComponentData(prev => ({
+      ...prev,
+      [idx]: { 
+        componentId, 
+        loading: true, 
+        net_kg: null, 
+        pcs: null, 
+        unit_weight_g: null,
+        timestamp: null,
+        serial_no: null
+      }
+    }));
+  } else {
+    setComponentData(prev => ({
+      ...prev,
+      [idx]: { ...prev[idx], loading: true }
+    }));
+  }
 
-    try {
-const response = await axios.get("http://localhost:8000/get_weight");
-      const scaleData = response.data;
+  try {
+    const response = await axios.get("http://localhost:8000/get_weight");
 
-      setComponentData(prev => ({
-        ...prev,
-        [idx]: {
-          componentId,
-          loading: false,
-          net_kg: scaleData.net_kg,
-          pcs: scaleData.pcs,
-          unit_weight_g: scaleData.unit_weight_g,
-          timestamp: scaleData.timestamp,
-          serial_no: scaleData.serial_no
-        }
-      }));
-    } catch (error) {
-      console.error("Error fetching scale reading:", error);
+    if (response.status === 204 || !response.data) {
+      // No data yet from scale
       setComponentData(prev => ({
         ...prev,
         [idx]: {
@@ -105,11 +92,47 @@ const response = await axios.get("http://localhost:8000/get_weight");
           unit_weight_g: null,
           timestamp: null,
           serial_no: null,
-          error: "Failed to get scale reading"
+          error: "No scale data available"
         }
       }));
+      return;
     }
-  };
+
+    const scaleData = response.data;
+
+    // Validate scaleData fields
+    const isValidWeight = typeof scaleData.net_kg === "number" && scaleData.net_kg > 0;
+
+    setComponentData(prev => ({
+      ...prev,
+      [idx]: {
+        componentId,
+        loading: false,
+        net_kg: isValidWeight ? scaleData.net_kg : null,
+        pcs: scaleData.pcs || null,
+        unit_weight_g: scaleData.unit_weight_g || null,
+        timestamp: scaleData.timestamp || null,
+        serial_no: scaleData.serial_no || null,
+        error: isValidWeight ? null : "Invalid weight reading"
+      }
+    }));
+  } catch (error) {
+    console.error("Error fetching scale reading:", error);
+    setComponentData(prev => ({
+      ...prev,
+      [idx]: {
+        componentId,
+        loading: false,
+        net_kg: null,
+        pcs: null,
+        unit_weight_g: null,
+        timestamp: null,
+        serial_no: null,
+        error: "Failed to get scale reading"
+      }
+    }));
+  }
+};
 
   const handleBinScan = (bin) => {
     if (!bin.trim()) return;
