@@ -44,44 +44,80 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
 
   // Check if all components have scale readings
   const allComponentsHaveScaleReadings = () => {
-    return scannedComponents.length > 0 && scannedComponents.every((_, idx) => 
-      componentData[idx] && 
-      !componentData[idx].loading && 
+    return scannedComponents.length > 0 && scannedComponents.every((_, idx) =>
+      componentData[idx] &&
+      !componentData[idx].loading &&
       componentData[idx].net_kg !== null
     );
   };
 
   // Helper for readiness count
-  const readyCount = scannedComponents.filter((_, idx) => 
+  const readyCount = scannedComponents.filter((_, idx) =>
     componentData[idx] && !componentData[idx].loading && componentData[idx].net_kg !== null
   ).length;
 
-const fetchScaleReading = async (componentId, idx) => {
-  if (!componentData[idx]) {
-    setComponentData(prev => ({
-      ...prev,
-      [idx]: { 
-        componentId, 
-        loading: true, 
-        net_kg: null, 
-        pcs: null, 
-        unit_weight_g: null,
-        timestamp: null,
-        serial_no: null
+  const fetchScaleReading = async (componentId, idx) => {
+    if (!componentData[idx]) {
+      setComponentData(prev => ({
+        ...prev,
+        [idx]: {
+          componentId,
+          loading: true,
+          net_kg: null,
+          pcs: null,
+          unit_weight_g: null,
+          timestamp: null,
+          serial_no: null
+        }
+      }));
+    } else {
+      setComponentData(prev => ({
+        ...prev,
+        [idx]: { ...prev[idx], loading: true }
+      }));
+    }
+
+    try {
+      const response = await axios.get("http://localhost:8000/get_weight");
+
+      if (response.status === 204 || !response.data) {
+        // No data yet from scale
+        setComponentData(prev => ({
+          ...prev,
+          [idx]: {
+            componentId,
+            loading: false,
+            net_kg: null,
+            pcs: null,
+            unit_weight_g: null,
+            timestamp: null,
+            serial_no: null,
+            error: "No scale data available"
+          }
+        }));
+        return;
       }
-    }));
-  } else {
-    setComponentData(prev => ({
-      ...prev,
-      [idx]: { ...prev[idx], loading: true }
-    }));
-  }
 
-  try {
-    const response = await axios.get("http://localhost:8000/get_weight");
+      const scaleData = response.data;
 
-    if (response.status === 204 || !response.data) {
-      // No data yet from scale
+      // Validate scaleData fields
+      const isValidWeight = typeof scaleData.net_kg === "number" && scaleData.net_kg > 0;
+
+      setComponentData(prev => ({
+        ...prev,
+        [idx]: {
+          componentId,
+          loading: false,
+          net_kg: isValidWeight ? scaleData.net_kg : null,
+          pcs: scaleData.pcs || null,
+          unit_weight_g: scaleData.unit_weight_g || null,
+          timestamp: scaleData.timestamp || null,
+          serial_no: scaleData.serial_no || null,
+          error: isValidWeight ? null : "Invalid weight reading"
+        }
+      }));
+    } catch (error) {
+      console.error("Error fetching scale reading:", error);
       setComponentData(prev => ({
         ...prev,
         [idx]: {
@@ -92,47 +128,11 @@ const fetchScaleReading = async (componentId, idx) => {
           unit_weight_g: null,
           timestamp: null,
           serial_no: null,
-          error: "No scale data available"
+          error: "Failed to get scale reading"
         }
       }));
-      return;
     }
-
-    const scaleData = response.data;
-
-    // Validate scaleData fields
-    const isValidWeight = typeof scaleData.net_kg === "number" && scaleData.net_kg > 0;
-
-    setComponentData(prev => ({
-      ...prev,
-      [idx]: {
-        componentId,
-        loading: false,
-        net_kg: isValidWeight ? scaleData.net_kg : null,
-        pcs: scaleData.pcs || null,
-        unit_weight_g: scaleData.unit_weight_g || null,
-        timestamp: scaleData.timestamp || null,
-        serial_no: scaleData.serial_no || null,
-        error: isValidWeight ? null : "Invalid weight reading"
-      }
-    }));
-  } catch (error) {
-    console.error("Error fetching scale reading:", error);
-    setComponentData(prev => ({
-      ...prev,
-      [idx]: {
-        componentId,
-        loading: false,
-        net_kg: null,
-        pcs: null,
-        unit_weight_g: null,
-        timestamp: null,
-        serial_no: null,
-        error: "Failed to get scale reading"
-      }
-    }));
-  }
-};
+  };
 
   const handleBinScan = (bin) => {
     if (!bin.trim()) return;
@@ -143,7 +143,7 @@ const fetchScaleReading = async (componentId, idx) => {
 
   const handleComponentScan = async (componentId) => {
     if (!componentId.trim()) return;
-    
+
     if (scannedComponents.includes(componentId.trim())) {
       setMessage(`Component ${componentId} is already scanned.`);
       setShowMessageModal(true);
@@ -152,10 +152,10 @@ const fetchScaleReading = async (componentId, idx) => {
 
     const newComponents = [...scannedComponents, componentId.trim()];
     setScannedComponents(newComponents);
-    
+
     const idx = newComponents.length - 1;
     await fetchScaleReading(componentId.trim(), idx);
-    
+
     setMessage("");
   };
 
@@ -183,7 +183,7 @@ const fetchScaleReading = async (componentId, idx) => {
   const clearComponent = (idx) => {
     const newComponents = scannedComponents.filter((_, i) => i !== idx);
     setScannedComponents(newComponents);
-    
+
     const newComponentData = {};
     newComponents.forEach((comp, i) => {
       if (componentData[i]) {
@@ -238,10 +238,10 @@ const fetchScaleReading = async (componentId, idx) => {
       const response = await axios.post("/api/save-scan-data", payload);
 
       if (response.data.success) {
-        const statusMessage = jtcId 
+        const statusMessage = jtcId
           ? `Successfully saved bin ${binId} with ${scannedComponents.length} component(s). Status: Ready for Release.`
           : `Successfully saved bin ${binId} with ${scannedComponents.length} component(s). Status: Pending JTC Assignment.`;
-        
+
         setMessage(statusMessage);
         setShowMessageModal(true);
         setTimeout(() => {
@@ -348,11 +348,10 @@ const fetchScaleReading = async (componentId, idx) => {
 
             {/* Status Information */}
             <div className="max-w-md mx-auto">
-              <div className={`p-4 rounded-lg shadow-lg text-center ${
-                jtcId 
-                  ? "bg-gradient-to-r from-green-500 to-green-600 text-white" 
+              <div className={`p-4 rounded-lg shadow-lg text-center ${jtcId
+                  ? "bg-gradient-to-r from-green-500 to-green-600 text-white"
                   : "bg-gradient-to-r from-yellow-500 to-yellow-600 text-white"
-              }`}>
+                }`}>
                 <div className="flex items-center justify-center gap-3 mb-2">
                   <span className="text-2xl">
                     {jtcId ? "✅" : "⏳"}
@@ -367,8 +366,8 @@ const fetchScaleReading = async (componentId, idx) => {
                   </div>
                 </div>
                 <p className="text-xs opacity-80">
-                  {jtcId 
-                    ? "This bin will be marked as ready for release" 
+                  {jtcId
+                    ? "This bin will be marked as ready for release"
                     : "Scan JTC above to mark as ready for release"
                   }
                 </p>
@@ -450,45 +449,45 @@ const fetchScaleReading = async (componentId, idx) => {
                             </div>
 
                             {/* Weight Information - Read Only in Review Mode */}
-                          {/* Weight Information - Read Only in Review Mode */}
-<div className={`border rounded p-3 ${ready ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
-  <h5 className={`text-xs font-semibold mb-2 ${ready ? 'text-green-700' : 'text-red-700'}`}>
-    {ready ? '✅ Weight Information Confirmed:' : '⚠️ Weight Information Missing:'}
-  </h5>
-  {ready ? (
-    <div className="space-y-2 text-sm"> {/* Increased font size to text-sm */}
-      <div className="flex justify-between">
-        <span className="text-gray-600 font-medium">Unit Weight:</span>
-        <span className="font-semibold">
-          {componentData[idx].unit_weight_g != null
-            ? `${componentData[idx].unit_weight_g}g`
-            : "N/A"
-          }
-        </span>
-      </div>
-      <div className="flex justify-between">
-        <span className="text-gray-600 font-medium">Quantity:</span>
-        <span className="font-semibold">
-          {componentData[idx].pcs != null
-            ? `${componentData[idx].pcs} pcs`
-            : "N/A"
-          }
-        </span>
-      </div>
-      <div className="flex justify-between">
-        <span className="text-gray-600 font-medium">Total Weight:</span>
-        <span className="font-semibold">
-          {componentData[idx].net_kg != null
-            ? `${componentData[idx].net_kg}kg`
-            : "N/A"
-          }
-        </span>
-      </div>
-    </div>
-  ) : (
-    <span className="text-xs text-red-600">Scale reading required before saving</span>
-  )}
-</div>
+                            {/* Weight Information - Read Only in Review Mode */}
+                            <div className={`border rounded p-3 ${ready ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
+                              <h5 className={`text-xs font-semibold mb-2 ${ready ? 'text-green-700' : 'text-red-700'}`}>
+                                {ready ? '✅ Weight Information Confirmed:' : '⚠️ Weight Information Missing:'}
+                              </h5>
+                              {ready ? (
+                                <div className="space-y-2 text-sm"> {/* Increased font size to text-sm */}
+                                  <div className="flex justify-between">
+                                    <span className="text-gray-600 font-medium">Unit Weight:</span>
+                                    <span className="font-semibold">
+                                      {componentData[idx].unit_weight_g != null
+                                        ? `${componentData[idx].unit_weight_g}g`
+                                        : "N/A"
+                                      }
+                                    </span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span className="text-gray-600 font-medium">Quantity:</span>
+                                    <span className="font-semibold">
+                                      {componentData[idx].pcs != null
+                                        ? `${componentData[idx].pcs} pcs`
+                                        : "N/A"
+                                      }
+                                    </span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span className="text-gray-600 font-medium">Total Weight:</span>
+                                    <span className="font-semibold">
+                                      {componentData[idx].net_kg != null
+                                        ? `${componentData[idx].net_kg}kg`
+                                        : "N/A"
+                                      }
+                                    </span>
+                                  </div>
+                                </div>
+                              ) : (
+                                <span className="text-xs text-red-600">Scale reading required before saving</span>
+                              )}
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -513,11 +512,10 @@ const fetchScaleReading = async (componentId, idx) => {
                     <button
                       onClick={handleConfirmSave}
                       disabled={loading || !allComponentsHaveScaleReadings()}
-                      className={`px-8 py-3 rounded-lg font-semibold transition-colors ${
-                        loading || !allComponentsHaveScaleReadings()
+                      className={`px-8 py-3 rounded-lg font-semibold transition-colors ${loading || !allComponentsHaveScaleReadings()
                           ? "bg-gray-300 text-gray-500 cursor-not-allowed"
                           : "bg-green-600 text-white hover:bg-green-700"
-                      }`}
+                        }`}
                     >
                       {loading ? "Saving..." : allComponentsHaveScaleReadings() ? `✅ Confirm & Save` : `⚠️ Complete Scale Readings First`}
                     </button>
@@ -651,24 +649,23 @@ const fetchScaleReading = async (componentId, idx) => {
                             ) : (
                               <span className="text-xs text-red-500 font-semibold">⚠️ Scale reading required</span>
                             )}
-                            
+
                             <div className="mt-3">
                               <button
                                 onClick={() => fetchScaleReading(component, idx)}
                                 disabled={componentData[idx]?.loading}
-                                className={`w-full px-3 py-2 rounded transition-colors text-xs ${
-                                  componentData[idx]?.loading
+                                className={`w-full px-3 py-2 rounded transition-colors text-xs ${componentData[idx]?.loading
                                     ? "bg-gray-300 text-gray-500 cursor-not-allowed"
                                     : ready
-                                    ? "bg-green-600 text-white hover:bg-green-700"
-                                    : "bg-blue-600 text-white hover:bg-blue-700"
-                                }`}
+                                      ? "bg-green-600 text-white hover:bg-green-700"
+                                      : "bg-blue-600 text-white hover:bg-blue-700"
+                                  }`}
                               >
-                                {componentData[idx]?.loading 
-                                  ? "Reading..." 
+                                {componentData[idx]?.loading
+                                  ? "Reading..."
                                   : ready
-                                  ? "✅ Reading Complete"
-                                  : "📊 Get Scale Reading"
+                                    ? "✅ Reading Complete"
+                                    : "📊 Get Scale Reading"
                                 }
                               </button>
                             </div>
@@ -693,14 +690,13 @@ const fetchScaleReading = async (componentId, idx) => {
                 <button
                   onClick={handleNextToReview}
                   disabled={!allComponentsHaveScaleReadings()}
-                  className={`px-8 py-3 rounded-lg font-semibold transition-colors ${
-                    allComponentsHaveScaleReadings()
+                  className={`px-8 py-3 rounded-lg font-semibold transition-colors ${allComponentsHaveScaleReadings()
                       ? "bg-blue-600 text-white hover:bg-blue-700"
                       : "bg-gray-300 text-gray-500 cursor-not-allowed"
-                  }`}
+                    }`}
                 >
-                  {allComponentsHaveScaleReadings() 
-                    ? "📋 Review & Confirm →" 
+                  {allComponentsHaveScaleReadings()
+                    ? "📋 Review & Confirm →"
                     : "⚠️ Complete Scale Readings First"
                   }
                 </button>
