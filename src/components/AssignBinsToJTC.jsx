@@ -1,13 +1,10 @@
 import React, { useState, useRef, useEffect, forwardRef, useImperativeHandle } from "react";
 import axios from "axios";
-import JsBarcode from "jsbarcode";
-import { pdf, Document, Page } from "@react-pdf/renderer";
-import LabelPDFDocument from "./LabelPDFDocument";
 
 const AssignBinsToJTC = forwardRef(({ currentStep, onStepChange }, ref) => {
   const [step, setStep] = useState(currentStep || 0);
-  const [jtcId, setJtcId] = useState(""); // scanned barcode string
-  const [jtcInfo, setJtcInfo] = useState(null); // full JTC info from DB
+  const [jtcId, setJtcId] = useState("");
+  const [jtcInfo, setJtcInfo] = useState(null);
   const [scannedBins, setScannedBins] = useState([]);
   const [binComponents, setBinComponents] = useState({});
   const [loadingComponents, setLoadingComponents] = useState({});
@@ -18,15 +15,8 @@ const AssignBinsToJTC = forwardRef(({ currentStep, onStepChange }, ref) => {
   const [binToRemove, setBinToRemove] = useState(null);
   const [showRemoveConfirmModal, setShowRemoveConfirmModal] = useState(false);
   const [loading, setLoading] = useState(false);
-
-  const [binToReplace, setBinToReplace] = useState(null);
-  const [pendingBinId, setPendingBinId] = useState(null);
   const [binToConfirmAdd, setBinToConfirmAdd] = useState(null);
-  // Printing states
-  const [printTrigger, setPrintTrigger] = useState(false);
-  const [printBinData, setPrintBinData] = useState(null); // array of bins for multi-label PDF
-  const [pdfUrl, setPdfUrl] = useState(null);
-  const iframeRef = useRef(null);
+  const [assignedJtcForBin, setAssignedJtcForBin] = useState(null);
 
   const jtcInputRef = useRef(null);
   const binInputRef = useRef(null);
@@ -46,11 +36,9 @@ const AssignBinsToJTC = forwardRef(({ currentStep, onStepChange }, ref) => {
       setBinToRemove(null);
       setShowRemoveConfirmModal(false);
       setLoading(false);
-      setPrintTrigger(false);
-      setPrintBinData(null);
-      setPdfUrl(null);
+      setBinToConfirmAdd(null);
       if (onStepChange) onStepChange(0);
-    }
+    },
   }));
 
   useEffect(() => {
@@ -67,180 +55,110 @@ const AssignBinsToJTC = forwardRef(({ currentStep, onStepChange }, ref) => {
     }
   }, [step, scannedBins.length]);
 
-const pdfUrlRef = useRef(null);
-
-useEffect(() => {
-  console.log("printBinData changed:", printBinData);
-  if (!printBinData || printBinData.length === 0) {
-    setPdfUrl(null);
-    return;
-  }
-
-  const generatePdf = async () => {
+  // --- FETCH BIN COMPONENTS ---
+  const fetchBinComponents = async (binId) => {
+    setLoadingComponents((prev) => ({ ...prev, [binId]: true }));
     try {
-      const singlePageDoc = (
-        <Document>
-          <Page size={{ width: 226.77, height: 198.43 }} style={{ padding: 2 }}>
-            <LabelPDFDocument bin={printBinData} />
-          </Page>
-        </Document>
-      );
+      const response = await axios.get(`/api/bin-info/${binId}`);
+      const binData = response.data.bin;
 
-      const asPdf = pdf();
-      asPdf.updateContainer(singlePageDoc);
-      const blob = await asPdf.toBlob();
-      const url = URL.createObjectURL(blob);
+      if (binData.status === "Pending JTC") {
+        // OK to add
+      } else if (binData.status === "Ready for Release") {
+        setAssignedJtcForBin(binData.jtc);   // <-- Save assigned JTC ID!
 
-      if (pdfUrlRef.current) {
-        URL.revokeObjectURL(pdfUrlRef.current);
+        setBinToConfirmAdd(binId);
+
+        return false;
+      } else {
+        setMessage(
+          `Bin ${binId} is not ready for assignment (current status: "${binData.status}"). Please scan this bin in the "Scan Bin Items" tab first.`
+        );
+        setShowMessageModal(true);
+        return false;
       }
-      pdfUrlRef.current = url;
-      console.log("PDF URL set:", url);
 
-      setPdfUrl(url);
+      const components = [
+        { id: binData.component_1, quantity: binData.quantity_c1 },
+        { id: binData.component_2, quantity: binData.quantity_c2 },
+        { id: binData.component_3, quantity: binData.quantity_c3 },
+        { id: binData.component_4, quantity: binData.quantity_c4 },
+      ].filter((c) => c.id);
+
+      setBinComponents((prev) => ({
+        ...prev,
+        [binId]: {
+          components,
+          remark: binData.remark ? binData.remark.trim() : null,
+        },
+      }));
+      return true;
     } catch (error) {
-      console.error("Error generating PDF:", error);
-      setPdfUrl(null);
-    }
-  };
-
-  generatePdf();
-
-  return () => {
-    if (pdfUrlRef.current) {
-      URL.revokeObjectURL(pdfUrlRef.current);
-      pdfUrlRef.current = null;
-    }
-  };
-}, [printBinData]);
-  // Fetch bin info and check status
- const fetchBinComponents = async (binId) => {
-  setLoadingComponents((prev) => ({ ...prev, [binId]: true }));
-  try {
-    const response = await axios.get(`/api/bin-info/${binId}`);
-    const binData = response.data.bin;
-
-    if (binData.status === "Pending JTC") {
-      // OK to add directly
-    } else if (binData.status === "Ready for Release") {
-      // Show confirmation dialog to add anyway
-      setBinToConfirmAdd(binId);
-      return false; // pause adding until user confirms
-    } else {
-      setMessage(
-        `Bin ${binId} is not ready for assignment (current status: "${binData.status}"). Please scan this bin in the "Scan Bin Items" tab first.`
-      );
+      setMessage(`Error fetching bin info for ${binId}.`);
       setShowMessageModal(true);
+      setBinComponents((prev) => ({
+        ...prev,
+        [binId]: { components: [], remark: null },
+      }));
       return false;
-    }
-
-    const components = [
-      { id: binData.component_1, quantity: binData.quantity_c1 },
-      { id: binData.component_2, quantity: binData.quantity_c2 },
-      { id: binData.component_3, quantity: binData.quantity_c3 },
-      { id: binData.component_4, quantity: binData.quantity_c4 }
-    ].filter((c) => c.id);
-
-    setBinComponents((prev) => ({
-      ...prev,
-      [binId]: {
-        components,
-        remark: binData.remark ? binData.remark.trim() : null
-      }
-    }));
-    return true;
-  } catch (error) {
-    setMessage(`Error fetching bin info for ${binId}.`);
-    setShowMessageModal(true);
-    setBinComponents((prev) => ({
-      ...prev,
-      [binId]: { components: [], remark: null }
-    }));
-    return false;
-  } finally {
-    setLoadingComponents((prev) => ({ ...prev, [binId]: false }));
-  }
-};
-
-const generateBarcodeDataUrl = (text) => {
-  console.log("genretating barcode");
-    return new Promise((resolve, reject) => {
-    try {
-      const canvas = document.createElement("canvas");
-      JsBarcode(canvas, text, { format: "CODE128" });
-      const dataUrl = canvas.toDataURL("image/png");
-      resolve(dataUrl);
-    } catch (err) {
-      reject(err);
-    }
-  });
-};
-  // Fetch JTC info by barcode and set state
-const handleJtcScan = async (barcode) => {
-  if (!barcode.trim()) return;
-  setLoading(true);
-  try {
-    const response = await axios.get(`/api/jtc-info/${barcode.trim()}`);
-    const jtc = response.data.jtc;
-    setJtcInfo(jtc);
-    setJtcId(barcode.trim());
-    setMessage("");
-
-  
-    setStep(1);
-    if (onStepChange) onStepChange(1);
-  } catch (error) {
-    setMessage("JTC not found for scanned barcode.");
-    setShowMessageModal(true);
-  } finally {
-    setLoading(false);
-  }
-};
-
-const handleBinScan = async (binId) => {
-  if (!binId.trim()) return;
-  if (scannedBins.some((bin) => bin === binId)) {
-    setMessage(`Bin ${binId} is already assigned to this JTC.`);
-    setShowMessageModal(true);
-    return;
-  }
-  setMessage("");
-  const ok = await fetchBinComponents(binId.trim());
-  if (ok) {
-    setScannedBins((prev) => [...prev, binId.trim()]);
-  }
-};
-// User confirms adding bin despite "Ready for Release" status
-const confirmAddBin = async () => {
-  if (!binToConfirmAdd) return;
-  setScannedBins((prev) => [...prev, binToConfirmAdd]);
-  setBinToConfirmAdd(null);
-  setShowMessageModal(false);
-};
-
-// User cancels adding bin
-const cancelAddBin = () => {
-  setBinToConfirmAdd(null);
-  setShowMessageModal(false);
-};
-
-  const handleKeyDown = (e, type) => {
-    if (e.key === "Enter") {
-      if (type === "jtc") {
-        handleJtcScan(e.target.value);
-        e.target.value = "";
-      } else if (type === "bin") {
-        handleBinScan(e.target.value);
-        e.target.value = "";
-      }
+    } finally {
+      setLoadingComponents((prev) => ({ ...prev, [binId]: false }));
     }
   };
 
+  // --- HANDLE JTC SCAN ---
+  const handleJtcScan = async (barcode) => {
+    if (!barcode.trim()) return;
+    setLoading(true);
+    try {
+      const response = await axios.get(`/api/jtc-info/${barcode.trim()}`);
+      const jtc = response.data.jtc;
+      setJtcInfo(jtc);
+      setJtcId(barcode.trim());
+      setMessage("");
+      setStep(1);
+      if (onStepChange) onStepChange(1);
+    } catch (error) {
+      setMessage("JTC not found for scanned barcode.");
+      setShowMessageModal(true);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // --- HANDLE BIN SCAN ---
+  const handleBinScan = async (binId) => {
+    if (!binId.trim()) return;
+    if (scannedBins.some((bin) => bin === binId)) {
+      setMessage(`Bin ${binId} is already assigned to this JTC.`);
+      setShowMessageModal(true);
+
+      return;
+    }
+    setMessage("");
+    const ok = await fetchBinComponents(binId.trim());
+    if (ok) {
+      setScannedBins((prev) => [...prev, binId.trim()]);
+    }
+  };
+
+  // --- MODAL BIN ADD ---
+  const confirmAddBin = async () => {
+    if (!binToConfirmAdd) return;
+    setScannedBins((prev) => [...prev, binToConfirmAdd]);
+    setBinToConfirmAdd(null);
+    setShowMessageModal(false);
+  };
+  const cancelAddBin = () => {
+    setBinToConfirmAdd(null);
+    setShowMessageModal(false);
+  };
+
+  // --- MODAL BIN REMOVE ---
   const confirmRemoveBin = (bin) => {
     setBinToRemove(bin);
     setShowRemoveConfirmModal(true);
   };
-
   const removeBin = () => {
     if (binToRemove) {
       setScannedBins((prev) => prev.filter((bin) => bin !== binToRemove));
@@ -260,13 +178,12 @@ const cancelAddBin = () => {
       setShowRemoveConfirmModal(false);
     }
   };
-
   const cancelRemove = () => {
     setBinToRemove(null);
     setShowRemoveConfirmModal(false);
   };
 
-  // Confirm assignment and then print labels
+  // --- CONFIRM ASSIGNMENT & PRINT ---
   const handleConfirmAssignment = async () => {
     if (!jtcInfo || scannedBins.length === 0) {
       setMessage("Please scan JTC and at least one bin before confirming.");
@@ -279,73 +196,104 @@ const cancelAddBin = () => {
 
     try {
       const response = await axios.post("/api/assign-bins", {
-        jtc: jtcInfo.jtc_id, // send primary key here
-        bins: scannedBins
+        jtc: jtcInfo.jtc_id,
+        bins: scannedBins,
       });
 
       if (response.data.success) {
-        setMessage(`Successfully assigned ${scannedBins.length} bin(s) to JTC ${jtcInfo.jtc_orderNumber}} `);
+        setMessage(`Successfully assigned ${scannedBins.length} bin(s) to JTC ${jtcInfo.jtc_orderNumber}. Printing label(s)...`);
         setShowMessageModal(true);
-        setLoading(false);
 
+        // Prepare data to send to print label (use correct field names from your backend)
+        const bodyData = {
+          woNumber: jtcInfo.jtc_id,
+          partName: jtcInfo.jtc_PartNumber || jtcInfo.jtc_PartNo || "",
+          dateIssue: jtcInfo.jtc_createdAt || "",
+          stockCode: "",
+          processCode: "",
+          empNo: "",
+          qty: jtcInfo.jtc_quantityNeeded || "",
+          remarks: jtcInfo.jtc_orderNumber || "",
+        };
 
-// // Generate barcode image data URL from jtc_orderNumber
-//     const barcodeDataUrl = await generateBarcodeDataUrl(jtcInfo.jtc_orderNumber);
-//         setPrintBinData([{
-//           jtc: jtcInfo.jtc_orderNumber,
-//           component_1: "",
-//           last_updated: "",
-//           stock_code: "",
-//           process_code: "",
-//           emp_no: "",
-//           quantity_c1: "",
-//           remarks: jtcInfo.jtc_orderNumber,
-//           barcodeDataUrl,  // pass barcode image here
-//         }]);
-   
-
-   
-//         // setPrintBinData(binsData);
-//         setPrintTrigger(true);
-
+        console.log("Printing labels... bodyData:", bodyData);
+        // Print labels for each bin
+        for (let i = 0; i < scannedBins.length; i++) {
+          await fetch('/api/print-work-order-label', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(bodyData)
+          });
+        }
       } else {
         setMessage(response.data.error || "Error assigning bins.");
         setShowMessageModal(true);
-        setLoading(false);
       }
     } catch (error) {
       setMessage(error.response?.data?.error || "Network or server error.");
       setShowMessageModal(true);
+    } finally {
       setLoading(false);
     }
   };
 
-const closeMessageModal = () => {
-  setShowMessageModal(false);
-  setMessage("");
-  // Reset everything on modal close
-  setStep(0);
-  setJtcId("");
-  setJtcInfo(null);
-  setScannedBins([]);
-  setBinComponents({});
-  setLoadingComponents({});
-  setLoading(false);
-  setPrintTrigger(false);
-  setPrintBinData(null);
-  setPdfUrl(null);
-  if (onStepChange) onStepChange(0);
+const handlePrintLabel = async () => {
+  try {
+    const bodyData = {
+          woNumber: jtcInfo.jtc_id,
+          partName: jtcInfo.jtc_PartNumber || jtcInfo.jtc_PartNo || "",
+          dateIssue: jtcInfo.jtc_createdAt || "",
+          stockCode: "",
+          processCode: "",
+          empNo: "",
+          qty: jtcInfo.jtc_quantityNeeded || "",
+          remarks: jtcInfo.jtc_orderNumber || "",
+        };
+            console.log("Printing labels... bodyData:", bodyData);
+
+    await fetch('/api/print-work-order-label', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        bodyData
+      })
+    });
+    // Optional: Give feedback to the user (toast/snackbar/message)
+  } catch (err) {
+    alert('Print failed!');
+  }
 };
-  const openImageModal = (imageSrc) => {
-    setSelectedImage(imageSrc);
-    setShowImageModal(true);
+
+  const closeMessageModal = () => {
+    setShowMessageModal(false);
+    setMessage("");
+    // After closing modal, reset for next JTC
+    setStep(0);
+    setJtcId("");
+    setJtcInfo(null);
+    setScannedBins([]);
+    setBinComponents({});
+    setLoadingComponents({});
+    setBinToRemove(null);
+    setShowRemoveConfirmModal(false);
+    setBinToConfirmAdd(null);
+    if (onStepChange) onStepChange(0);
   };
 
-  const closeImageModal = () => {
-    setShowImageModal(false);
-    setSelectedImage("");
+  // --- KEYDOWN ---
+  const handleKeyDown = (e, type) => {
+    if (e.key === "Enter") {
+      if (type === "jtc") {
+        handleJtcScan(e.target.value);
+        e.target.value = "";
+      } else if (type === "bin") {
+        handleBinScan(e.target.value);
+        e.target.value = "";
+      }
+    }
   };
 
+  // --- BIN COMPONENTS DISPLAY (UNCHANGED, just for info display, no preview) ---
   const BinComponentsDisplay = ({ binId }) => {
     const binInfo = binComponents[binId] || {};
     const components = binInfo.components || [];
@@ -383,7 +331,6 @@ const closeMessageModal = () => {
                   src={`src/assets/components/${component.id}.jpg`}
                   alt={component.id}
                   className="w-full h-full object-contain"
-                  onClick={() => openImageModal(`src/assets/components/${component.id}.jpg`)}
                   onError={(e) => {
                     if (e.target.src.endsWith(".jpg")) {
                       e.target.src = `src/assets/components/${component.id}.png`;
@@ -408,10 +355,10 @@ const closeMessageModal = () => {
     );
   };
 
+  // --- UI ---
   return (
     <div>
       <div className="space-y-6">
-        {/* Step 0: JTC Scan */}
         {step === 0 && (
           <div className="max-w-2xl mx-auto">
             <div className="flex items-center gap-4">
@@ -430,8 +377,6 @@ const closeMessageModal = () => {
             </div>
           </div>
         )}
-
-        {/* Step 1: Bin Scan and Review */}
         {step === 1 && (
           <div>
             <div className="max-w-2xl mx-auto">
@@ -450,8 +395,6 @@ const closeMessageModal = () => {
                 />
               </div>
             </div>
-
-            {/* Current JTC Display */}
             <div className="max-w-4xl mx-auto">
               <div className="bg-gradient-to-r from-purple-500 to-purple-600 text-white p-6 rounded-xl shadow-lg border-l-8 border-purple-700">
                 <div className="flex items-center justify-between">
@@ -460,7 +403,9 @@ const closeMessageModal = () => {
                       <span className="text-2xl">🏷️</span>
                     </div>
                     <div>
-                      <h2 className="text-sm font-medium text-purple-100 uppercase tracking-wide">JTC Work Order</h2>
+                      <h2 className="text-sm font-medium text-purple-100 uppercase tracking-wide">
+                        JTC Work Order
+                      </h2>
                       <p className="text-2xl font-bold font-mono">{jtcInfo?.jtc_orderNumber || jtcId}</p>
                     </div>
                   </div>
@@ -471,8 +416,6 @@ const closeMessageModal = () => {
                 </div>
               </div>
             </div>
-
-            {/* Scanned Bins Display */}
             {scannedBins.length > 0 && (
               <div className="max-w-7xl mx-auto mt-8">
                 <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
@@ -481,7 +424,10 @@ const closeMessageModal = () => {
                   </h3>
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                     {scannedBins.map((bin, idx) => (
-                      <div key={idx} className="bg-white border rounded-lg p-4 shadow-sm hover:shadow-md transition-shadow">
+                      <div
+                        key={idx}
+                        className="bg-white border rounded-lg p-4 shadow-sm hover:shadow-md transition-shadow"
+                      >
                         <div className="flex items-center justify-between mb-3">
                           <div className="flex items-center gap-3">
                             <span className="font-mono text-gray-700 font-semibold text-sm">
@@ -508,15 +454,11 @@ const closeMessageModal = () => {
                 </div>
               </div>
             )}
-
-            {/* Confirm Button at Bottom */}
             <div className="flex justify-center gap-4 mt-8">
               <button
                 onClick={handleConfirmAssignment}
                 disabled={loading}
-                className={`px-8 py-3 rounded-lg font-semibold transition-colors ${loading
-                  ? "bg-gray-300 text-gray-500 cursor-not-allowed"
-                  : "bg-green-600 text-white hover:bg-green-700"
+                className={`px-8 py-3 rounded-lg font-semibold transition-colors ${loading ? "bg-gray-300 text-gray-500 cursor-not-allowed" : "bg-green-600 text-white hover:bg-green-700"
                   }`}
               >
                 {loading ? "Saving..." : `✅ Confirm Assignment & Print`}
@@ -526,42 +468,47 @@ const closeMessageModal = () => {
         )}
       </div>
 
+      {/* Bin Already Assigned Modal */}
       {binToConfirmAdd && (
-  <div
-    className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-    onClick={cancelAddBin}
-  >
-    <div
-      className="bg-white rounded-lg p-6 max-w-sm w-full"
-      onClick={(e) => e.stopPropagation()}
-    >
-      <h2 className="text-lg font-semibold mb-4">Bin Already Assigned</h2>
-      <p className="mb-6 text-gray-700">
-        Bin <span className="font-mono">{binToConfirmAdd}</span> is already assigned with status "Ready for Release".
-        Do you want to add it anyway and replace the current assignment on save?
-      </p>
-      <div className="flex justify-end space-x-3">
-        <button
+        <div
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
           onClick={cancelAddBin}
-          className="px-4 py-2 bg-gray-300 rounded hover:bg-gray-400"
         >
-          Cancel
-        </button>
-        <button
-          onClick={confirmAddBin}
-          className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700"
-        >
-          Yes, Add Bin
-        </button>
-      </div>
-    </div>
-  </div>
-)}
+          <div
+            className="bg-white rounded-lg p-6 max-w-sm w-full"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 className="text-lg font-semibold mb-4">Bin Already Assigned</h2>
+            <p className="mb-6 text-gray-700">
+              Bin <span className="font-mono">{binToConfirmAdd}</span> is already assigned
+              {assignedJtcForBin ? (
+                <> with JTC <span className="font-mono">{assignedJtcForBin}</span>.</>
+              ) : (
+                " to another JTC."
+              )} Reassign?
+            </p>
+            <div className="flex justify-end space-x-3">
+              <button
+                onClick={cancelAddBin}
+                className="px-4 py-2 bg-gray-300 rounded hover:bg-gray-400"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmAddBin}
+                className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700"
+              >
+                Yes, Add Bin
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
-      {/* Message Modal with PDF preview */}
+      {/* Message Modal (Success/Error) */}
       {showMessageModal && (
         <div
-          className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4"
+          className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4 overflow-auto"
           onClick={closeMessageModal}
         >
           <div
@@ -569,71 +516,23 @@ const closeMessageModal = () => {
             onClick={(e) => e.stopPropagation()}
             style={{ minWidth: "320px" }}
           >
-            {/* Message */}
-            <p className="text-center text-gray-900 text-lg font-semibold mb-6 leading-relaxed select-text">
+            <p className="text-center text-gray-900 text-lg font-semibold mb-4 leading-relaxed select-text">
               {message}
             </p>
-
-            {/* PDF Preview */}
-            {/* {printTrigger && (
-              <>
-
-                {pdfUrl ? (
-                  <iframe
-                    ref={iframeRef}
-                    src={pdfUrl}
-                    onLoad={() => console.log("PDF iframe loaded")}
-                    style={{
-                      width: "100%",
-                      height: "420px",
-                      border: "2px solid #4F46E5", // Indigo-600 border
-                      borderRadius: "8px",
-                      boxShadow: "0 4px 12px rgba(79, 70, 229, 0.3)",
-                      marginBottom: "1.5rem",
-                    }}
-                    title="Label Preview"
-                  />
-                ) : (
-                  <p>loading preview...</p>
-        )}
-
-                <div className="flex justify-center gap-6">
-                  <button
-                    onClick={() => {
-                      if (iframeRef.current) {
-                        iframeRef.current.contentWindow.focus();
-                        iframeRef.current.contentWindow.print();
-                      }
-                    }}
-                    className="px-6 py-2 bg-indigo-600 text-white rounded-lg shadow-md hover:bg-indigo-700 transition-colors font-semibold"
-                  >
-                    Print
-                  </button>
-                  <button
-                    onClick={() => {
-                      setPrintTrigger(false);
-                      setPrintBinData(null);
-                      setPdfUrl(null);
-                      closeMessageModal();
-                    }}
-                    className="px-6 py-2 bg-gray-300 rounded-lg shadow-md hover:bg-gray-400 transition-colors font-semibold"
-                  >
-                    Close
-                  </button>
-                </div>
-              </>
-            )} */}
-
-            {/* OK button when not printing */}
-              <div className="flex justify-center mt-6">
-                <button
-                  onClick={closeMessageModal}
-                  className="px-6 py-2 bg-blue-600 text-white rounded-lg shadow-md hover:bg-blue-700 transition-colors font-semibold"
-                >
-                  OK
-                </button>
-              </div>
-          
+            <div className="flex justify-center gap-4">
+              <button
+                onClick={handlePrintLabel}
+                className="px-6 py-2 bg-green-600 text-white rounded-lg shadow-md hover:bg-green-700 transition-colors font-semibold"
+              >
+                🖨️ Print
+              </button>
+              <button
+                onClick={closeMessageModal}
+                className="px-6 py-2 bg-blue-600 text-white rounded-lg shadow-md hover:bg-blue-700 transition-colors font-semibold"
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -663,7 +562,7 @@ const closeMessageModal = () => {
         </div>
       )}
 
-      {/* Remove Confirmation Modal */}
+      {/* Remove Confirm Modal */}
       {showRemoveConfirmModal && (
         <div
           className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
