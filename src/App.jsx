@@ -117,7 +117,7 @@ const ProcessStepsCard = ({ activeTab, onImageClick, currentStep, onStepClick, o
       {
         id: 1,
         title: "Scan Components",
-        image: "/images/scan-step3-component.jpg",
+        image: "src/assets/component-qr.png",
         placeholder: "https://placehold.co/200x200/10b981/ffffff?text=Components"
       },
       {
@@ -211,6 +211,12 @@ const ProcessStepsCard = ({ activeTab, onImageClick, currentStep, onStepClick, o
                   }}
                   style={{ cursor: isClickable ? 'pointer' : 'default', minHeight: '140px' }}
                 >
+                        {/* Status indicator */}
+                      {isActive && (
+                       <div className="absolute top-2 right-2 w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center animate-pulse z-10">
+      <span className="text-white text-xs">●</span>
+    </div>
+                      )}
                   {/* Step Number - Top Left */}
                   <div className={`absolute top-2 left-2 w-8 h-8 ${
                     isCompleted ? 'bg-green-600' : tabColor.step
@@ -219,12 +225,12 @@ const ProcessStepsCard = ({ activeTab, onImageClick, currentStep, onStepClick, o
                   </div>
 
                   {/* Image Area - 40% */}
-                  <div className="flex-shrink-0 flex items-center justify-center relative" style={{ flexBasis: "40%" }}>
+                  <div className="flex-shrink-0 flex items-center justify-center relative" style={{ flexBasis: "60%" }}>
                     <div className="relative w-full h-full flex items-center justify-center">
                       <img
                         src={step.image}
                         alt={step.title}
-                        className="w-full h-36 rounded-lg border-2 border-gray-200 cursor-pointer hover:shadow-xl hover:border-blue-300 transition-all duration-200 object-cover"
+  className="w-50 h-40 rounded-lg border-2 border-gray-200 cursor-pointer hover:shadow-xl hover:border-blue-300 transition-all duration-200 object-cover"
                         onClick={(e) => {
                           e.stopPropagation();
                           onImageClick(step.image);
@@ -233,12 +239,7 @@ const ProcessStepsCard = ({ activeTab, onImageClick, currentStep, onStepClick, o
                           e.target.src = step.placeholder;
                         }}
                       />
-                      {/* Status indicator */}
-                      {isActive && (
-                        <div className="absolute -top-2 -right-2 w-6 h-6 bg-blue-500 rounded-full flex items-center justify-center animate-pulse">
-                          <span className="text-white text-xs">●</span>
-                        </div>
-                      )}
+                
                     </div>
                   </div>
 
@@ -248,7 +249,7 @@ const ProcessStepsCard = ({ activeTab, onImageClick, currentStep, onStepClick, o
                       isActive ? tabColor.text : isCompleted ? 'text-green-700' : ''
                     }`}>
                       {step.title}
-                      {isActive && <span className="ml-2 text-blue-600 text-lg">←</span>}
+                      {isActive && <span className="ml-2 text-blue-600 text-lg"></span>}
                     </div>
                     {/* Add click hint for pending steps */}
                     {status === 'pending' && isClickable && (

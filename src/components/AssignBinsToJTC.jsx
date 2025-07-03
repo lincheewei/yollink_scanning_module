@@ -17,6 +17,7 @@ const AssignBinsToJTC = forwardRef(({ currentStep, onStepChange }, ref) => {
   const [loading, setLoading] = useState(false);
   const [binToConfirmAdd, setBinToConfirmAdd] = useState(null);
   const [assignedJtcForBin, setAssignedJtcForBin] = useState(null);
+  const [printData, setPrintData] = useState(null);
 
   const jtcInputRef = useRef(null);
   const binInputRef = useRef(null);
@@ -106,41 +107,48 @@ const AssignBinsToJTC = forwardRef(({ currentStep, onStepChange }, ref) => {
     }
   };
 
-  // --- HANDLE JTC SCAN ---
-  const handleJtcScan = async (barcode) => {
-    if (!barcode.trim()) return;
-    setLoading(true);
-    try {
-      const response = await axios.get(`/api/jtc-info/${barcode.trim()}`);
-      const jtc = response.data.jtc;
-      setJtcInfo(jtc);
-      setJtcId(barcode.trim());
-      setMessage("");
-      setStep(1);
-      if (onStepChange) onStepChange(1);
-    } catch (error) {
-      setMessage("JTC not found for scanned barcode.");
-      setShowMessageModal(true);
-    } finally {
-      setLoading(false);
-    }
-  };
+const handleJtcScan = async (barcode) => {
+  if (!barcode.trim()) return;
+
+  // ✅ Step 1: Remove *j prefix and normalize
+  const normalizedJtcId = barcode.trim().replace(/^(\*j)/i, "").toUpperCase();
+
+  setLoading(true);
+  try {
+    const response = await axios.get(`/api/jtc-info/${normalizedJtcId}`);
+    const jtc = response.data.jtc;
+
+    setJtcInfo(jtc);
+    setJtcId(normalizedJtcId);
+    setMessage("");
+    setStep(1);
+    if (onStepChange) onStepChange(1);
+  } catch (error) {
+    setMessage("JTC not found for scanned barcode.");
+    setShowMessageModal(true);
+  } finally {
+    setLoading(false);
+  }
+};
 
   // --- HANDLE BIN SCAN ---
-  const handleBinScan = async (binId) => {
-    if (!binId.trim()) return;
-    if (scannedBins.some((bin) => bin === binId)) {
-      setMessage(`Bin ${binId} is already assigned to this JTC.`);
-      setShowMessageModal(true);
+ const handleBinScan = async (binId) => {
+  const normalizedBinId = binId.trim().toUpperCase();
+  if (!normalizedBinId) return;
 
-      return;
-    }
-    setMessage("");
-    const ok = await fetchBinComponents(binId.trim());
-    if (ok) {
-      setScannedBins((prev) => [...prev, binId.trim()]);
-    }
-  };
+  // Check for duplicate (case-insensitive)
+  if (scannedBins.includes(normalizedBinId)) {
+    setMessage(`Bin ${normalizedBinId} is already assigned to this JTC.`);
+    setShowMessageModal(true);
+    return;
+  }
+
+  setMessage("");
+  const ok = await fetchBinComponents(normalizedBinId);
+  if (ok) {
+    setScannedBins((prev) => [...prev, normalizedBinId]);
+  }
+};
 
   // --- MODAL BIN ADD ---
   const confirmAddBin = async () => {
@@ -215,15 +223,27 @@ const AssignBinsToJTC = forwardRef(({ currentStep, onStepChange }, ref) => {
           qty: jtcInfo.jtc_quantityNeeded || "",
           remarks: jtcInfo.jtc_orderNumber || "",
         };
+        const labelData = {
+          woNumber: jtcInfo.jtc_id,
+          partName: jtcInfo.jtc_PartNumber || jtcInfo.jtc_PartNo || "",
+          dateIssue: jtcInfo.jtc_createdAt || "",
+          stockCode: "",
+          processCode: "",
+          empNo: "",
+          qty: jtcInfo.jtc_quantityNeeded || "",
+          remarks: jtcInfo.jtc_orderNumber || "",
+        };
+
+        setPrintData(labelData);
 
         console.log("Printing labels... bodyData:", bodyData);
         // Print labels for each bin
         for (let i = 0; i < scannedBins.length; i++) {
-          await fetch('/api/print-work-order-label', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(bodyData)
-          });
+        await fetch('/api/print-work-order-label', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(bodyData)
+        });
         }
       } else {
         setMessage(response.data.error || "Error assigning bins.");
@@ -237,32 +257,32 @@ const AssignBinsToJTC = forwardRef(({ currentStep, onStepChange }, ref) => {
     }
   };
 
-const handlePrintLabel = async () => {
-  try {
-    const bodyData = {
-          woNumber: jtcInfo.jtc_id,
-          partName: jtcInfo.jtc_PartNumber || jtcInfo.jtc_PartNo || "",
-          dateIssue: jtcInfo.jtc_createdAt || "",
-          stockCode: "",
-          processCode: "",
-          empNo: "",
-          qty: jtcInfo.jtc_quantityNeeded || "",
-          remarks: jtcInfo.jtc_orderNumber || "",
-        };
-            console.log("Printing labels... bodyData:", bodyData);
+  const handlePrintLabel = async () => {
+    try {
+      const bodyData = {
+        woNumber: jtcInfo.jtc_id,
+        partName: jtcInfo.jtc_PartNumber || jtcInfo.jtc_PartNo || "",
+        dateIssue: jtcInfo.jtc_createdAt || "",
+        stockCode: "",
+        processCode: "",
+        empNo: "",
+        qty: jtcInfo.jtc_quantityNeeded || "",
+        remarks: jtcInfo.jtc_orderNumber || "",
+      };
+      console.log("Printing labels... printdata:", printData);
 
-    await fetch('/api/print-work-order-label', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        bodyData
-      })
-    });
-    // Optional: Give feedback to the user (toast/snackbar/message)
-  } catch (err) {
-    alert('Print failed!');
-  }
-};
+      await fetch('/api/print-work-order-label', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(
+          printData
+        )
+      });
+      // Optional: Give feedback to the user (toast/snackbar/message)
+    } catch (err) {
+      alert('Print failed!');
+    }
+  };
 
   const closeMessageModal = () => {
     setShowMessageModal(false);

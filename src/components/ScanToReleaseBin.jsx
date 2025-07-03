@@ -104,23 +104,28 @@ const ScanToReleaseBin = forwardRef(({ onStepChange }, ref) => {
     return grouped;
   }
 
-  const handleBinScan = async (binId) => {
-    if (!binId.trim()) return;
-    if (scannedBins.includes(binId)) {
-      setMessage(`Bin ${binId} is already in the release list.`);
-      setShowMessageModal(true);
-      setCurrentBinId("");
-      return;
-    }
-    setMessage("");
-    
-    // Only add if status check passes
-    const ok = await fetchBinComponents(binId.trim());
-    if (ok) {
-      setScannedBins(prev => [...prev, binId.trim()]);
-    }
+const handleBinScan = async (binId) => {
+  const normalized = binId.trim().toUpperCase();
+  if (!normalized) return;
+
+  // Prevent duplicate
+  if (scannedBins.includes(normalized)) {
+    setMessage(`Bin ${normalized} is already in the release list.`);
+    setShowMessageModal(true);
     setCurrentBinId("");
-  };
+    return;
+  }
+
+  setMessage("");
+
+  // Only add if status check passes
+  const ok = await fetchBinComponents(normalized);
+  if (ok) {
+    setScannedBins((prev) => [...prev, normalized]);
+  }
+
+  setCurrentBinId("");
+};
 
   const handleKeyDown = (e) => {
     if (e.key === "Enter") {

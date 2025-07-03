@@ -125,7 +125,7 @@ app.post('/api/save-scan-data', async (req, res) => {
         actual_weight_c3 = EXCLUDED.actual_weight_c3,
         actual_weight_c4 = EXCLUDED.actual_weight_c4,
         status = EXCLUDED.status,
-        location = EXCpLUDED.location,
+        location = EXCLUDED.location,
         last_updated = NOW()
     `;
 
@@ -565,8 +565,17 @@ function generateWorkOrderTSPL({
   processCode = '',
   empNo = '',
   qty = '',
-  remarks = ''
+  remarks = '',
+  jtc_barcodeId = ''   // ⬅️ 新增参数
 }) {
+  // Format date to DD/MM/YYYY
+  const formattedDate = dateIssue
+    ? new Date(dateIssue).toLocaleDateString("en-GB")
+    : '';
+
+  // Prepare barcode content with *j prefix
+  const barcodeContent = `*j${jtc_barcodeId}`;
+
   return `
 SIZE 80 mm, 70 mm
 GAP 2 mm, 0 mm
@@ -580,63 +589,43 @@ BOX 10,10,630,550,3
 TEXT 200,20,"3",0,1,1,"WORK ORDER LABEL"
 
 ; GRID LINES -------------------------------------------------
-; Header row bottom
 BAR 10,80,630,3
-
-; --- ROW 1 (W.O. NO. / PART NAME) ---
 BAR 10,170,630,3
-; 30/70 vertical (W.O. NO. | PART NAME)
 BAR 200,80,3,90
-
-; --- ROW 2 (DATE / STOCK / PROCESS) ---
 BAR 10,260,630,3
-; 30% = 186, next 30% = 186, last = 248
-BAR 196,170,3,90      ; after DATE ISSUE (30%)
-BAR 392,170,3,90      ; after STOCK CODE (30%)
-; (PROCESS CODE = remainder, 40%)
-
-; --- ROW 3 (EMP NO. / QTY) ---
+BAR 196,170,3,90
+BAR 392,170,3,90
 BAR 10,350,630,3
-; 30/70 vertical (EMP NO. | QTY)
 BAR 200,260,3,90
-
-; --- REMARKS row (no split)
 BAR 10,600,630,3
 
-; --- END GRID LINES ---
-
-; -------- LABELS & VALUES (adjusted positions) --------
-; Row 1 - W.O. NO. (left 30%), PART NAME (right 70%)
+; -------- LABELS & VALUES --------
 TEXT 20,90,"1",0,1,1,"W.O. NO.:"
 TEXT 20,120,"2",0,1,1,"${woNumber}"
 TEXT 210,90,"1",0,1,1,"PART NAME:"
 TEXT 210,120,"2",0,1,1,"${partName}"
 
-; Row 2 - DATE ISSUE | STOCK CODE | PROCESS CODE/NO.
 TEXT 20,180,"1",0,1,1,"DATE ISSUE:"
-TEXT 20,210,"2",0,1,1,"${dateIssue}"
+TEXT 20,210,"2",0,1,1,"${formattedDate}"
 TEXT 200,180,"1",0,1,1,"STOCK CODE:"
 TEXT 200,210,"2",0,1,1,"${stockCode}"
 TEXT 400,180,"1",0,1,1,"PROCESS CODE/NO.:"
 TEXT 400,210,"2",0,1,1,"${processCode}"
 
-; Row 3 - EMP NO. (30%), QTY (70%)
 TEXT 20,270,"1",0,1,1,"EMP. NO.:"
 TEXT 20,300,"2",0,1,1,"${empNo}"
 TEXT 210,270,"1",0,1,1,"QTY.:"
 TEXT 210,300,"2",0,1,1,"${qty}"
 
-; Remarks row (full width)
 TEXT 20,360,"1",0,1,1,"REMARKS:"
 TEXT 20,400,"2",0,1,1,"${remarks}"
 
-; (Optionally add barcode)
-BARCODE 330,430,"128",80,1,0,2,2,"${woNumber}"
+; Barcode with *j + barcode ID
+BARCODE 330,430,"128",80,1,0,2,2,"${barcodeContent}"
 
 PRINT 1,1
   `;
 }
-
 console.log('End of file reached');
 
 const server = app.listen(9090, () => console.log('Server running on port 9090'));

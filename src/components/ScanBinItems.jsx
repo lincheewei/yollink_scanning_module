@@ -11,7 +11,7 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
   const [showImageModal, setShowImageModal] = useState(false);
   const [selectedImage, setSelectedImage] = useState("");
   const [loading, setLoading] = useState(false);
-
+  const [jtcInfo, setJtcInfo] = useState(null);
   const binInputRef = useRef(null);
   const componentInputRef = useRef(null);
   const jtcInputRef = useRef(null);
@@ -31,6 +31,7 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
       setShowImageModal(false);
       setSelectedImage("");
       setLoading(false);
+      setJtcInfo("")
       if (onStepChange) onStepChange(0);
     }
   }));
@@ -69,11 +70,11 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
     if (!componentData[idx]) {
       setComponentData(prev => ({
         ...prev,
-        [idx]: { 
-          componentId, 
-          loading: true, 
-          net_kg: null, 
-          pcs: null, 
+        [idx]: {
+          componentId,
+          loading: true,
+          net_kg: null,
+          pcs: null,
           unit_weight_g: null,
           timestamp: null,
           serial_no: null
@@ -147,31 +148,65 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
 
   const handleBinScan = (bin) => {
     if (!bin.trim()) return;
-    setBinId(bin.trim());
+    const normalized = bin.trim().toUpperCase(); // ← convert to uppercase
+    setBinId(normalized);
     setMessage("");
     if (onStepChange) onStepChange(1);
   };
 
   const handleComponentScan = async (componentId) => {
-    if (!componentId.trim()) return;
-    
-    if (scannedComponents.includes(componentId.trim())) {
+    const normalizedId = componentId.trim().toUpperCase();
+    if (!normalizedId) return;
+
+    if (scannedComponents.includes(normalizedId)) {
       setMessage(`Component ${componentId} is already scanned.`);
       setShowMessageModal(true);
       return;
     }
 
-    const newComponents = [...scannedComponents, componentId.trim()];
+    const newComponents = [...scannedComponents, normalizedId];
     setScannedComponents(newComponents);
-  
-    
+
+
     setMessage("");
   };
 
-  const handleJtcScan = (jtc) => {
-    if (!jtc.trim()) return;
-    setJtcId(jtc.trim());
-    setMessage("");
+  const handleJtcScan = async (jtc) => {
+    const normalized = jtc.trim().replace(/^(\*j)/i, "").toUpperCase();
+    if (!normalized) return;
+
+    setLoading(true);
+    try {
+      const response = await axios.get(`/api/jtc-info/${normalized}`);
+      const jtcData = response.data.jtc;
+      console.log("JTC Data:", jtcData);
+      setJtcId(normalized);
+      setJtcInfo(jtcData); // ✅ store detailed info
+      setMessage("");
+    } catch (error) {
+      setMessage("JTC not found for scanned barcode.");
+      setShowMessageModal(true);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handlePrintLabel = async () => {
+    try {
+
+      console.log("Printing labels... printdata:", jtcData);
+
+      await fetch('/api/print-work-order-label', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(
+          jtcData
+        )
+      });
+      // Optional: Give feedback to the user (toast/snackbar/message)
+    } catch (err) {
+      alert('Print failed!');
+    }
   };
 
   const handleKeyDown = (e, type) => {
@@ -192,7 +227,7 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
   const clearComponent = (idx) => {
     const newComponents = scannedComponents.filter((_, i) => i !== idx);
     setScannedComponents(newComponents);
-    
+
     const newComponentData = {};
     newComponents.forEach((comp, i) => {
       if (componentData[i]) {
@@ -247,15 +282,16 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
       const response = await axios.post("/api/save-scan-data", payload);
 
       if (response.data.success) {
-        const statusMessage = jtcId 
+        if (jtcInfo) {
+          handlePrintLabel();
+        }
+        const statusMessage = jtcId
           ? `Successfully saved bin ${binId} with ${scannedComponents.length} component(s). Status: Ready for Release.`
           : `Successfully saved bin ${binId} with ${scannedComponents.length} component(s). Status: Pending JTC Assignment.`;
-        
+
         setMessage(statusMessage);
         setShowMessageModal(true);
-        setTimeout(() => {
-          handleReset();
-        }, 3000);
+ 
       } else {
         setMessage(response.data.error || "Error saving bin information.");
         setShowMessageModal(true);
@@ -273,6 +309,7 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
     setScannedComponents([]);
     setComponentData({});
     setJtcId("");
+    setJtcInfo("");
     setMessage("");
     setShowMessageModal(false);
     if (onStepChange) onStepChange(0);
@@ -355,32 +392,59 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
               />
             </div>
 
-            {/* Status Information */}
-            <div className="max-w-md mx-auto">
-              <div className={`p-4 rounded-lg shadow-lg text-center ${
-                jtcId 
-                  ? "bg-gradient-to-r from-green-500 to-green-600 text-white" 
-                  : "bg-gradient-to-r from-yellow-500 to-yellow-600 text-white"
-              }`}>
-                <div className="flex items-center justify-center gap-3 mb-2">
-                  <span className="text-2xl">
-                    {jtcId ? "✅" : "⏳"}
-                  </span>
-                  <div>
-                    <p className="text-sm font-medium opacity-90 uppercase tracking-wide">
-                      {jtcId ? "Ready for Release" : "Pending JTC Assignment"}
-                    </p>
-                    <p className="text-lg font-bold">
-                      {jtcId ? `JTC: ${jtcId}` : "No JTC Assigned"}
-                    </p>
+            {/* JTC Status and Confirm Button in one row */}
+            <div className="max-w-5xl mx-auto mt-6">
+              <div className="flex flex-col lg:flex-row items-stretch gap-6">
+
+                {/* Status Info Box */}
+                <div className={`flex-1 p-6 rounded-xl shadow-lg border-l-8 ${jtcId
+                  ? "bg-gradient-to-r from-green-500 to-green-600 text-white border-green-700"
+                  : "bg-gradient-to-r from-yellow-500 to-yellow-600 text-white border-yellow-700"
+                  }`}>
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-3">
+                      <div className="bg-white bg-opacity-20 p-3 rounded-full">
+                        <span className="text-2xl">{jtcId ? "✅" : "⏳"}</span>
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium uppercase tracking-wide opacity-90">
+                          {jtcId ? "Ready for Release" : "No JTC Assignment"}
+                        </p>
+                        <p className="text-xl font-bold font-mono">
+                          JTC: {jtcInfo?.jtc_orderNumber || jtcId || "N/A"}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                  <p className="text-xs opacity-80">
+                    {jtcId
+                      ? "This bin will be assigned to this JTC"
+                      : "Scan JTC above to assign this bin to a JTC"}
+                  </p>
+                </div>
+
+                {/* Confirm & Save Button */}
+                <div className="w-full lg:w-1/3 flex flex-col justify-center">
+                  <div className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm text-center">
+                      <span className="font-semibold">
+                      {readyCount} / {scannedComponents.length} components ready
+                    </span>
+                    <button
+                      onClick={handleConfirmSave}
+                      disabled={loading || !allComponentsHaveScaleReadings()}
+                      className={`w-full px-6 py-3 rounded-lg font-semibold transition-colors text-sm ${loading || !allComponentsHaveScaleReadings()
+                        ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                        : "bg-green-600 text-white hover:bg-green-700"
+                        }`}
+                    >
+                      {loading
+                        ? "Saving..."
+                        : allComponentsHaveScaleReadings()
+                          ? "✅ Confirm & Save"
+                          : "⚠️ Complete Scale Readings First"}
+                    </button>
                   </div>
                 </div>
-                <p className="text-xs opacity-80">
-                  {jtcId 
-                    ? "This bin will be marked as ready for release" 
-                    : "Scan JTC above to mark as ready for release"
-                  }
-                </p>
               </div>
             </div>
 
@@ -511,28 +575,16 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
                 {/* Readiness Summary and Action Buttons at Bottom */}
                 <div className="text-center mt-8">
                   <div className="mb-4 text-sm">
-                    <span className="font-semibold">
-                      {readyCount} / {scannedComponents.length} components ready
-                    </span>
+               
                   </div>
                   <div className="flex justify-center gap-4">
                     <button
                       onClick={() => onStepChange && onStepChange(1)}
                       className="px-6 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
                     >
-                      ← Back to Components
+                      ← Back to Scan Components
                     </button>
-                    <button
-                      onClick={handleConfirmSave}
-                      disabled={loading || !allComponentsHaveScaleReadings()}
-                      className={`px-8 py-3 rounded-lg font-semibold transition-colors ${
-                        loading || !allComponentsHaveScaleReadings()
-                          ? "bg-gray-300 text-gray-500 cursor-not-allowed"
-                          : "bg-green-600 text-white hover:bg-green-700"
-                      }`}
-                    >
-                      {loading ? "Saving..." : allComponentsHaveScaleReadings() ? `✅ Confirm & Save` : `⚠️ Complete Scale Readings First`}
-                    </button>
+               
                   </div>
                 </div>
               </div>
@@ -540,24 +592,49 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
           </div>
         )}
 
-        {/* Current Bin Display - Always Visible for Step 1 */}
         {binId && currentStep === 1 && (
-          <div className="max-w-4xl mx-auto">
-            <div className="bg-gradient-to-r from-blue-500 to-blue-600 text-white p-6 rounded-xl shadow-lg border-l-8 border-blue-700">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-4">
-                  <div className="bg-white bg-opacity-20 p-3 rounded-full">
-                    <span className="text-2xl">📦</span>
+          <div className="max-w-7xl mx-auto mb-6">
+            <div className="flex flex-col lg:flex-row gap-6 items-stretch">
+
+              {/* Current Bin Display */}
+              <div className="flex-1 bg-gradient-to-r from-blue-500 to-blue-600 text-white p-6 rounded-xl shadow-lg border-l-8 border-blue-700">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-4">
+                    <div className="bg-white bg-opacity-20 p-3 rounded-full">
+                      <span className="text-2xl">📦</span>
+                    </div>
+                    <div>
+                      <h2 className="text-sm font-medium text-blue-100 uppercase tracking-wide">Current Bin</h2>
+                      <p className="text-2xl font-bold font-mono">{binId}</p>
+                    </div>
                   </div>
-                  <div>
-                    <h2 className="text-sm font-medium text-blue-100 uppercase tracking-wide">Current Bin</h2>
-                    <p className="text-2xl font-bold font-mono">{binId}</p>
+                  <div className="text-right">
+                    <p className="text-sm text-blue-100">Components Scanned</p>
+                    <p className="text-3xl font-bold">{scannedComponents.length}</p>
                   </div>
                 </div>
-                <div className="text-right">
-                  <p className="text-sm text-blue-100">Components Scanned</p>
-                  <p className="text-3xl font-bold">{scannedComponents.length}</p>
+              </div>
+
+              {/* Review Button */}
+              <div className="flex flex-col justify-center items-center w-full lg:w-1/3">
+                <div className="w-full bg-yellow-50 border border-yellow-200 rounded-lg p-4 text-yellow-800 mb-4 text-center">
+                  <p className="font-semibold text-sm mb-1">⚠️ Scale Readings</p>
+                  <p className="text-xs">
+                    {readyCount} / {scannedComponents.length} ready
+                  </p>
                 </div>
+                <button
+                  onClick={handleNextToReview}
+                  disabled={!allComponentsHaveScaleReadings()}
+                  className={`w-full px-6 py-3 rounded-lg font-semibold transition-colors text-sm ${allComponentsHaveScaleReadings()
+                    ? "bg-blue-600 text-white hover:bg-blue-700"
+                    : "bg-gray-300 text-gray-500 cursor-not-allowed"
+                    }`}
+                >
+                  {allComponentsHaveScaleReadings()
+                    ? "📋 Review & Confirm →"
+                    : "⚠️ Complete Scale Readings First"}
+                </button>
               </div>
             </div>
           </div>
@@ -670,24 +747,23 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
                             ) : (
                               <span className="text-xs text-red-500 font-semibold">⚠️ Scale reading required</span>
                             )}
-                            
+
                             <div className="mt-3">
                               <button
                                 onClick={() => fetchScaleReading(component, idx)}
                                 disabled={data?.loading}
-                                className={`w-full px-3 py-2 rounded transition-colors text-xs ${
-                                  data?.loading
-                                    ? "bg-gray-300 text-gray-500 cursor-not-allowed"
-                                    : ready
+                                className={`w-full px-3 py-2 rounded transition-colors text-xs ${data?.loading
+                                  ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                                  : ready
                                     ? "bg-green-600 text-white hover:bg-green-700"
                                     : "bg-blue-600 text-white hover:bg-blue-700"
-                                }`}
+                                  }`}
                               >
-                                {data?.loading 
-                                  ? "Reading..." 
+                                {data?.loading
+                                  ? "Reading..."
                                   : ready
-                                  ? "✅ Reading Complete"
-                                  : "📊 Get Scale Reading"
+                                    ? "✅ Reading Complete"
+                                    : "📊 Get Scale Reading"
                                 }
                               </button>
                             </div>
@@ -709,20 +785,7 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
                     Components with readings: {readyCount} / {scannedComponents.length}
                   </p>
                 </div>
-                <button
-                  onClick={handleNextToReview}
-                  disabled={!allComponentsHaveScaleReadings()}
-                  className={`px-8 py-3 rounded-lg font-semibold transition-colors ${
-                    allComponentsHaveScaleReadings()
-                      ? "bg-blue-600 text-white hover:bg-blue-700"
-                      : "bg-gray-300 text-gray-500 cursor-not-allowed"
-                  }`}
-                >
-                  {allComponentsHaveScaleReadings() 
-                    ? "📋 Review & Confirm →" 
-                    : "⚠️ Complete Scale Readings First"
-                  }
-                </button>
+
               </div>
             </div>
           </div>
@@ -747,12 +810,20 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
             onClick={(e) => e.stopPropagation()}
           >
             <p className="text-center text-gray-800 mb-4">{message}</p>
-            <div className="flex justify-center">
+            <div className="flex justify-center gap-3">
+              {message.startsWith("Successfully") && (
+                <button
+                  onClick={handlePrintLabel}
+                  className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 text-sm"
+                >
+                  🖨️ Print Label
+                </button>
+              )}
               <button
                 onClick={closeMessageModal}
-                className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+                className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm"
               >
-                OK
+                Close
               </button>
             </div>
           </div>
