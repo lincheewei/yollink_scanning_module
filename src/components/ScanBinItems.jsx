@@ -199,9 +199,9 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
       await fetch('/api/print-work-order-label', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        body: JSON.stringify(
           jtcInfo
-        }
+        
         )
       });
       // Optional: Give feedback to the user (toast/snackbar/message)
