@@ -204,6 +204,7 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
           empNo: "",
           qty: jtcInfo.jtc_quantityNeeded || "",
           remarks: jtcInfo.jtc_orderNumber || "",
+          jtc_barcodeId: jtcInfo.jtc_barcodeId || "",
         };
 
       console.log("Printing labels... prininfo:", labelData);

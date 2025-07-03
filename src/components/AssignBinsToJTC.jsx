@@ -232,6 +232,8 @@ const handleJtcScan = async (barcode) => {
           empNo: "",
           qty: jtcInfo.jtc_quantityNeeded || "",
           remarks: jtcInfo.jtc_orderNumber || "",
+                    jtc_barcodeId: jtcInfo.jtc_barcodeId || "",
+          
         };
 
         setPrintData(labelData);
