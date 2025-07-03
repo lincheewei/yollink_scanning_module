@@ -213,16 +213,7 @@ const handleJtcScan = async (barcode) => {
         setShowMessageModal(true);
 
         // Prepare data to send to print label (use correct field names from your backend)
-        const bodyData = {
-          woNumber: jtcInfo.jtc_id,
-          partName: jtcInfo.jtc_PartNumber || jtcInfo.jtc_PartNo || "",
-          dateIssue: jtcInfo.jtc_createdAt || "",
-          stockCode: "",
-          processCode: "",
-          empNo: "",
-          qty: jtcInfo.jtc_quantityNeeded || "",
-          remarks: jtcInfo.jtc_orderNumber || "",
-        };
+      
         const labelData = {
           woNumber: jtcInfo.jtc_id,
           partName: jtcInfo.jtc_PartNumber || jtcInfo.jtc_PartNo || "",
@@ -232,19 +223,19 @@ const handleJtcScan = async (barcode) => {
           empNo: "",
           qty: jtcInfo.jtc_quantityNeeded || "",
           remarks: jtcInfo.jtc_orderNumber || "",
-                    jtc_barcodeId: jtcInfo.jtc_barcodeId || "",
+          jtc_barcodeId: jtcInfo.jtc_barcodeId || "",
           
         };
 
         setPrintData(labelData);
 
-        console.log("Printing labels... bodyData:", bodyData);
+        console.log("Printing labels... bodyData:", labelData);
         // Print labels for each bin
         for (let i = 0; i < scannedBins.length; i++) {
         await fetch('/api/print-work-order-label', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(bodyData)
+          body: JSON.stringify(labelData)
         });
         }
       } else {
@@ -261,16 +252,7 @@ const handleJtcScan = async (barcode) => {
 
   const handlePrintLabel = async () => {
     try {
-      const bodyData = {
-        woNumber: jtcInfo.jtc_id,
-        partName: jtcInfo.jtc_PartNumber || jtcInfo.jtc_PartNo || "",
-        dateIssue: jtcInfo.jtc_createdAt || "",
-        stockCode: "",
-        processCode: "",
-        empNo: "",
-        qty: jtcInfo.jtc_quantityNeeded || "",
-        remarks: jtcInfo.jtc_orderNumber || "",
-      };
+    
       console.log("Printing labels... printdata:", printData);
 
       await fetch('/api/print-work-order-label', {
