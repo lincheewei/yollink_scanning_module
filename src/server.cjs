@@ -542,7 +542,7 @@ app.post('/api/print-work-order-label', async (req, res) => {
   // Send TSPL to local print agent on the Windows PC (replace with your agent's IP!)
   try {
     const response = await axios.post(
-      'http://10.0.120.136:9999/print-label', // e.g. http://192.168.1.55:9999/print-label
+      'http://10.0.110.115:9999/print-label', // e.g. http://192.168.1.55:9999/print-label
       { tspl },
       { timeout: 5000 }
     );
