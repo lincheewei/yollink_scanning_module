@@ -194,13 +194,25 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
   const handlePrintLabel = async () => {
     try {
 
-      console.log("Printing labels... prininfo:", jtcInfo);
+
+          const labelData = {
+          woNumber: jtcInfo.jtc_id,
+          partName: jtcInfo.jtc_PartNumber || jtcInfo.jtc_PartNo || "",
+          dateIssue: jtcInfo.jtc_createdAt || "",
+          stockCode: "",
+          processCode: "",
+          empNo: "",
+          qty: jtcInfo.jtc_quantityNeeded || "",
+          remarks: jtcInfo.jtc_orderNumber || "",
+        };
+
+      console.log("Printing labels... prininfo:", labelData);
 
       await fetch('/api/print-work-order-label', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(
-          jtcInfo
+          labelData
         
         )
       });
