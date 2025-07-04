@@ -183,11 +183,7 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
 
       setScannedComponents(components);
 
-      // // 并行读取秤重（可选：也可以用 for..of 按顺序来）
-      // await Promise.all(
-      //   components.map((compId) => fetchScaleReading(compId))
-      // );
-
+  
       if (onStepChange) onStepChange(1);
     } catch (err) {
       console.error("❌ Failed to fetch components for bin:", err);
@@ -195,6 +191,24 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
       setShowMessageModal(true);
     }
   };
+
+
+  const handleComponentScan = async (componentIdRaw) => {
+  const componentId = componentIdRaw.trim().toUpperCase();
+  if (!componentId) return;
+
+  if (scannedComponents.includes(componentId)) {
+    setMessage(`Component ${componentId} already scanned.`);
+    setShowMessageModal(true);
+    return;
+  }
+
+  setScannedComponents(prev => [...prev, componentId]);
+
+
+
+  if (onStepChange) onStepChange(1); // 可选：继续停留在当前 step
+};
   const handleJtcScan = async (jtc) => {
     const normalized = jtc.trim().replace(/^(\*j)/i, "").toUpperCase();
     if (!normalized) return;
