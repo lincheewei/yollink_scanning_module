@@ -183,10 +183,10 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
 
       setScannedComponents(components);
 
-      // 并行读取秤重（可选：也可以用 for..of 按顺序来）
-      await Promise.all(
-        components.map((compId) => fetchScaleReading(compId))
-      );
+      // // 并行读取秤重（可选：也可以用 for..of 按顺序来）
+      // await Promise.all(
+      //   components.map((compId) => fetchScaleReading(compId))
+      // );
 
       if (onStepChange) onStepChange(1);
     } catch (err) {
