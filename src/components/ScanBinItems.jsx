@@ -357,6 +357,18 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
     }
   };
 
+const resetAfterSuccess = () => {
+  setBinId("");
+  setScannedComponents([]);
+  setComponentData({});
+  setJtcId("");
+  setJtcInfo(null);
+  setMessage("");
+  setShowMessageModal(false);
+  if (onStepChange) onStepChange(0);
+};
+
+
   const handleReset = () => {
     setBinId("");
     setScannedComponents([]);
@@ -368,11 +380,17 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
     if (onStepChange) onStepChange(0);
   };
 
-  const closeMessageModal = () => {
-    handleReset();
-    focusActiveInput();
+const closeMessageModal = () => {
+  setShowMessageModal(false);
 
-  };
+  // ✅ Only reset if success message
+  if (message.startsWith("Successfully")) {
+    resetAfterSuccess();
+  }
+
+  setMessage(""); // Clear message in either case
+  focusActiveInput();
+};
 
   const openImageModal = (imageSrc) => {
     setSelectedImage(imageSrc);

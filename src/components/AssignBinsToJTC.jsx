@@ -238,6 +238,8 @@ const AssignBinsToJTC = forwardRef(({ currentStep, onStepChange }, ref) => {
             body: JSON.stringify(labelData)
           });
         }
+
+
       } else {
         setMessage(response.data.error || "Error assigning bins.");
         setShowMessageModal(true);
@@ -268,20 +270,27 @@ const AssignBinsToJTC = forwardRef(({ currentStep, onStepChange }, ref) => {
     }
   };
 
+  const resetForNextJTC = () => {
+  setStep(0);
+  setJtcId("");
+  setJtcInfo(null);
+  setScannedBins([]);
+  setBinComponents({});
+  setLoadingComponents({});
+  setBinToRemove(null);
+  setShowRemoveConfirmModal(false);
+  setBinToConfirmAdd(null);
+  if (onStepChange) onStepChange(0);
+};
+
   const closeMessageModal = () => {
     setShowMessageModal(false);
+      // ✅ Only reset when it's a success message
+    if (message.startsWith("Successfully assigned")) {
+      resetForNextJTC();
+    }
     setMessage("");
-    // After closing modal, reset for next JTC
-    setStep(0);
-    setJtcId("");
-    setJtcInfo(null);
-    setScannedBins([]);
-    setBinComponents({});
-    setLoadingComponents({});
-    setBinToRemove(null);
-    setShowRemoveConfirmModal(false);
-    setBinToConfirmAdd(null);
-    if (onStepChange) onStepChange(0);
+ 
 
   };
 
