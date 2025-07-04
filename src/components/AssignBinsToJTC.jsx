@@ -287,9 +287,10 @@ const AssignBinsToJTC = forwardRef(({ currentStep, onStepChange }, ref) => {
 
   // --- KEYDOWN ---
   const handleKeyDown = (e, type) => {
-    e.preventDefault(); // ⛔ 阻止默认行为（避免触发表单提交或按钮点击）
 
     if (e.key === "Enter") {
+          e.preventDefault(); // ⛔ 阻止默认行为（避免触发表单提交或按钮点击）
+
       if (type === "jtc") {
         handleJtcScan(e.target.value);
         e.target.value = "";

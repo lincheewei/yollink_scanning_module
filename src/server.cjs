@@ -298,7 +298,7 @@ app.post('/api/release-bins', async (req, res) => {
       });
     }
 
-    const invalidBins = checkResult.rows.filter(row => row.status !== 'Ready for release');
+    const invalidBins = checkResult.rows.filter(row => row.status !== 'Ready for Release');
     if (invalidBins.length > 0) {
       const invalidBinIds = invalidBins.map(row => `${row.bin_id} (${row.status})`);
       return res.status(400).json({

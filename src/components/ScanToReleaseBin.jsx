@@ -48,7 +48,7 @@ const ScanToReleaseBin = forwardRef(({ onStepChange }, ref) => {
         setMessage(
           `Bin ${binId} is not ready for release (current status: "${binData.status}"). ${binData.status === "Pending JTC"
             ? "Please assign this bin to a JTC first in the 'Assign Bins to JTC' tab."
-            : binData.status === "released"
+            : binData.status === "Released"
               ? "This bin has already been released."
               : "Please complete the scanning process for this bin first."
           }`
