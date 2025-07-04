@@ -325,7 +325,7 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
 
       const payload = {
         binId,
-        jtc: jtcId || null,
+        jtc: jtcInfo?.jtc_id || null,  // ✅ correct value from DB
         components,
         quantities,
         expectedWeights,
