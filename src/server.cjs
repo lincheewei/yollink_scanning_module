@@ -311,7 +311,7 @@ app.post('/api/release-bins', async (req, res) => {
     for (const row of checkResult.rows) {
       const updateQuery = `
         UPDATE jtc_bin 
-        SET status = 'released', last_used = NOW(), last_updated = NOW(), location = $1 
+        SET status = 'Released', last_used = NOW(), last_updated = NOW(), location = $1 
         WHERE bin_id = $2
       `;
       await pool.query(updateQuery, [row.wc_id || 'UNKNOWN_WC', row.bin_id]);
@@ -352,7 +352,7 @@ app.post('/api/update-bin-status', async (req, res) => {
   }
 
   // Validate status values
-  const validStatuses = ['pending JTC', 'ready for release', 'released'];
+  const validStatuses = ['Pending JTC', 'Ready for Release', 'Released'];
   if (!validStatuses.includes(status)) {
     return res.status(400).json({
       success: false,

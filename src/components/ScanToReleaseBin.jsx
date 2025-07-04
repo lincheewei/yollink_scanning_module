@@ -44,12 +44,11 @@ const ScanToReleaseBin = forwardRef(({ onStepChange }, ref) => {
       const binData = response.data.bin;
 
       // Only allow bins with status "ready for release"
-      if (binData.status !== "ready for release") {
+      if (binData.status !== "Ready for Release") {
         setMessage(
-          `Bin ${binId} is not ready for release (current status: "${binData.status}"). ${
-            binData.status === "pending JTC" 
-              ? "Please assign this bin to a JTC first in the 'Assign Bins to JTC' tab."
-              : binData.status === "released"
+          `Bin ${binId} is not ready for release (current status: "${binData.status}"). ${binData.status === "Pending JTC"
+            ? "Please assign this bin to a JTC first in the 'Assign Bins to JTC' tab."
+            : binData.status === "released"
               ? "This bin has already been released."
               : "Please complete the scanning process for this bin first."
           }`
@@ -68,8 +67,8 @@ const ScanToReleaseBin = forwardRef(({ onStepChange }, ref) => {
 
       setBinComponents(prev => ({
         ...prev,
-        [binId]: { 
-          components, 
+        [binId]: {
+          components,
           remark: binData.remark ? binData.remark.trim() : null,
           jtc: binData.jtc || null,
           wc_id: binData.wc_id || "Unknown Workcell",
@@ -104,35 +103,46 @@ const ScanToReleaseBin = forwardRef(({ onStepChange }, ref) => {
     return grouped;
   }
 
-const handleBinScan = async (binId) => {
-  const normalized = binId.trim().toUpperCase();
-  if (!normalized) return;
+  const handleBinScan = async (binId) => {
+    const normalized = binId.trim().toUpperCase();
+    if (!normalized) return;
 
-  // Prevent duplicate
-  if (scannedBins.includes(normalized)) {
-    setMessage(`Bin ${normalized} is already in the release list.`);
-    setShowMessageModal(true);
-    setCurrentBinId("");
-    return;
-  }
-
-  setMessage("");
-
-  // Only add if status check passes
-  const ok = await fetchBinComponents(normalized);
-  if (ok) {
-    setScannedBins((prev) => [...prev, normalized]);
-  }
-
-  setCurrentBinId("");
-};
-
-  const handleKeyDown = (e) => {
-    if (e.key === "Enter") {
-      handleBinScan(currentBinId.trim());
+    // Prevent duplicate
+    if (scannedBins.includes(normalized)) {
+      setMessage(`Bin ${normalized} is already in the release list.`);
+      setShowMessageModal(true);
+      setCurrentBinId("");
+      return;
     }
+
+    setMessage("");
+
+    // Only add if status check passes
+    const ok = await fetchBinComponents(normalized);
+    if (ok) {
+      setScannedBins((prev) => [...prev, normalized]);
+    }
+
+    setCurrentBinId("");
   };
 
+  const handleKeyDown = (e) => {
+    const isInput = ["input", "textarea"].includes(e.target.tagName.toLowerCase());
+
+    // ⛔ 若非输入框或扫描框，不处理
+    if (!isInput) return;
+
+    // ✅ 阻止默认行为，避免触发按钮 click 或 form 提交
+    if (e.key === "Enter") {
+      e.preventDefault();
+
+      const scanned = e.target.value.trim();
+      if (scanned) {
+        handleBinScan(scanned);
+        e.target.value = ""; // 清空输入框
+      }
+    }
+  };
   const confirmRemoveBin = (bin) => {
     setBinToRemove(bin);
     setShowRemoveConfirmModal(true);
@@ -292,12 +302,12 @@ const handleBinScan = async (binId) => {
               📦 {binId}
             </span>
             {/* Status Badge */}
-             {binInfo.jtc && (
+            {binInfo.jtc && (
               <span className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded border border-blue-200">
                 🏷️ JTC: {binInfo.jtc}
               </span>
             )}
-                {binInfo.station_id && (
+            {binInfo.station_id && (
               <span className="text-xs text-orange-600 bg-orange-50 px-2 py-1 rounded border border-orange-200">
                 🛰️ Station {binInfo.station_id}
               </span>
@@ -307,8 +317,8 @@ const handleBinScan = async (binId) => {
                 📝 {binInfo.remark}
               </span>
             )}
-        
-        
+
+
           </div>
           <button
             onClick={() => confirmRemoveBin(binId)}
@@ -355,7 +365,7 @@ const handleBinScan = async (binId) => {
               </button>
             )}
           </div>
-          
+
           {/* Status Information */}
           {/* <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg">
             <p className="text-sm text-green-700 text-center">
@@ -376,7 +386,7 @@ const handleBinScan = async (binId) => {
                   All bins below have been verified and are ready to be released
                 </p>
               </div> */}
-              
+
               <div className="space-y-8">
                 {Object.entries(groupedBins).map(([workcell, binIds]) => (
                   <div key={workcell} className="border-b border-gray-200 pb-8 last:border-b-0">
@@ -403,11 +413,10 @@ const handleBinScan = async (binId) => {
           <button
             onClick={handleConfirmRelease}
             disabled={loading || scannedBins.length === 0}
-            className={`px-8 py-3 rounded-lg font-semibold transition-colors ${
-              loading || scannedBins.length === 0
+            className={`px-8 py-3 rounded-lg font-semibold transition-colors ${loading || scannedBins.length === 0
                 ? "bg-gray-300 text-gray-500 cursor-not-allowed"
                 : "bg-green-600 text-white hover:bg-green-700"
-            }`}
+              }`}
           >
             {loading ? "Processing..." : `✅ Confirm Release (${scannedBins.length} bins)`}
           </button>

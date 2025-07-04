@@ -16,6 +16,12 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
   const componentInputRef = useRef(null);
   const jtcInputRef = useRef(null);
 
+  const focusActiveInput = () => {
+    if (currentStep === 0 && binInputRef.current) binInputRef.current.focus();
+    else if (currentStep === 1 && componentInputRef.current) componentInputRef.current.focus();
+    else if (currentStep === 2 && jtcInputRef.current) jtcInputRef.current.focus();
+  };
+
   // Helper to check positive number
   const isPositiveNumber = (val) => typeof val === "number" && val > 0;
 
@@ -31,10 +37,28 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
       setShowImageModal(false);
       setSelectedImage("");
       setLoading(false);
-      setJtcInfo("")
+      setJtcInfo(null);
       if (onStepChange) onStepChange(0);
     }
   }));
+
+  useEffect(() => {
+    const handleGlobalClick = (e) => {
+      const tag = e.target.tagName.toLowerCase();
+      const isButton = tag === 'button' || e.target.closest('button');
+      const isModal = e.target.closest('.modal') || e.target.classList.contains('modal');
+
+      if (!isButton && !isModal) {
+        focusActiveInput();
+      }
+    };
+
+    document.addEventListener("click", handleGlobalClick);
+
+    return () => {
+      document.removeEventListener("click", handleGlobalClick);
+    };
+  }, [currentStep]);
 
   useEffect(() => {
     if (currentStep === 0) {
@@ -48,8 +72,8 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
 
   // Check if all components have valid scale readings (all > 0)
   const allComponentsHaveScaleReadings = () => {
-    return scannedComponents.length > 0 && scannedComponents.every((_, idx) => {
-      const data = componentData[idx];
+    return scannedComponents.length > 0 && scannedComponents.every((compId) => {
+      const data = componentData[compId];
       return data && !data.loading &&
         isPositiveNumber(data.net_kg) &&
         isPositiveNumber(data.pcs) &&
@@ -58,43 +82,30 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
   };
 
   // Helper for readiness count
-  const readyCount = scannedComponents.filter((_, idx) => {
-    const data = componentData[idx];
+  const readyCount = scannedComponents.filter((compId) => {
+    const data = componentData[compId];
     return data && !data.loading &&
       isPositiveNumber(data.net_kg) &&
       isPositiveNumber(data.pcs) &&
       isPositiveNumber(data.unit_weight_g);
   }).length;
 
-  const fetchScaleReading = async (componentId, idx) => {
-    if (!componentData[idx]) {
-      setComponentData(prev => ({
-        ...prev,
-        [idx]: {
-          componentId,
-          loading: true,
-          net_kg: null,
-          pcs: null,
-          unit_weight_g: null,
-          timestamp: null,
-          serial_no: null
-        }
-      }));
-    } else {
-      setComponentData(prev => ({
-        ...prev,
-        [idx]: { ...prev[idx], loading: true }
-      }));
-    }
+  const fetchScaleReading = async (componentId) => {
+    setComponentData(prev => ({
+      ...prev,
+      [componentId]: {
+        ...(prev[componentId] || {}),
+        loading: true,
+      }
+    }));
 
     try {
       const response = await axios.get("http://localhost:8000/get_weight");
 
       if (response.status === 204 || !response.data) {
-        // No data yet from scale
         setComponentData(prev => ({
           ...prev,
-          [idx]: {
+          [componentId]: {
             componentId,
             loading: false,
             net_kg: null,
@@ -110,14 +121,13 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
 
       const scaleData = response.data;
 
-      // Validate scaleData fields
       const validNetKg = isPositiveNumber(scaleData.net_kg) ? scaleData.net_kg : null;
       const validPcs = isPositiveNumber(scaleData.pcs) ? scaleData.pcs : null;
       const validUnitWeight = isPositiveNumber(scaleData.unit_weight_g) ? scaleData.unit_weight_g : null;
 
       setComponentData(prev => ({
         ...prev,
-        [idx]: {
+        [componentId]: {
           componentId,
           loading: false,
           net_kg: validNetKg,
@@ -132,7 +142,7 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
       console.error("Error fetching scale reading:", error);
       setComponentData(prev => ({
         ...prev,
-        [idx]: {
+        [componentId]: {
           componentId,
           loading: false,
           net_kg: null,
@@ -146,31 +156,45 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
     }
   };
 
-  const handleBinScan = (bin) => {
+  const handleBinScan = async (bin) => {
     if (!bin.trim()) return;
-    const normalized = bin.trim().toUpperCase(); // ← convert to uppercase
+
+    const normalized = bin.trim().toUpperCase();
     setBinId(normalized);
     setMessage("");
-    if (onStepChange) onStepChange(1);
-  };
 
-  const handleComponentScan = async (componentId) => {
-    const normalizedId = componentId.trim().toUpperCase();
-    if (!normalizedId) return;
+    try {
+      const res = await axios.get(`/api/bin-info/${normalized}`);
+      const rawData = res.data.bin;
+      console.log("Raw data from API:", rawData);
+      // 收集非空组件字段
+      const components = [
+        rawData.component_1,
+        rawData.component_2,
+        rawData.component_3,
+        rawData.component_4,
+      ].filter((comp) => typeof comp === "string" && comp.trim() !== "");
 
-    if (scannedComponents.includes(normalizedId)) {
-      setMessage(`Component ${componentId} is already scanned.`);
+      if (components.length === 0) {
+        setMessage("❌ No components found for this bin.");
+        setShowMessageModal(true);
+        return;
+      }
+
+      setScannedComponents(components);
+
+      // 并行读取秤重（可选：也可以用 for..of 按顺序来）
+      await Promise.all(
+        components.map((compId) => fetchScaleReading(compId))
+      );
+
+      if (onStepChange) onStepChange(1);
+    } catch (err) {
+      console.error("❌ Failed to fetch components for bin:", err);
+      setMessage("❌ Error fetching bin components.");
       setShowMessageModal(true);
-      return;
     }
-
-    const newComponents = [...scannedComponents, normalizedId];
-    setScannedComponents(newComponents);
-
-
-    setMessage("");
   };
-
   const handleJtcScan = async (jtc) => {
     const normalized = jtc.trim().replace(/^(\*j)/i, "").toUpperCase();
     if (!normalized) return;
@@ -195,17 +219,17 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
     try {
 
 
-          const labelData = {
-          woNumber: jtcInfo.jtc_id,
-          partName: jtcInfo.jtc_PartNumber || jtcInfo.jtc_PartNo || "",
-          dateIssue: jtcInfo.jtc_createdAt || "",
-          stockCode: "",
-          processCode: "",
-          empNo: "",
-          qty: jtcInfo.jtc_quantityNeeded || "",
-          remarks: jtcInfo.jtc_orderNumber || "",
-          jtc_barcodeId: jtcInfo.jtc_barcodeId || "",
-        };
+      const labelData = {
+        woNumber: jtcInfo.jtc_id,
+        partName: jtcInfo.jtc_PartNumber || jtcInfo.jtc_PartNo || "",
+        dateIssue: jtcInfo.jtc_createdAt || "",
+        stockCode: "",
+        processCode: "",
+        empNo: "",
+        qty: jtcInfo.jtc_quantityNeeded || "",
+        remarks: jtcInfo.jtc_orderNumber || "",
+        jtc_barcodeId: jtcInfo.jtc_barcodeId || "",
+      };
 
       console.log("Printing labels... prininfo:", labelData);
 
@@ -214,7 +238,7 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(
           labelData
-        
+
         )
       });
       // Optional: Give feedback to the user (toast/snackbar/message)
@@ -225,6 +249,8 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
 
   const handleKeyDown = (e, type) => {
     if (e.key === "Enter") {
+      e.preventDefault(); // ⛔ 阻止默认行为（避免触发表单提交或按钮点击）
+
       if (type === "bin") {
         handleBinScan(e.target.value);
         e.target.value = "";
@@ -239,15 +265,14 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
   };
 
   const clearComponent = (idx) => {
+    const removedComponent = scannedComponents[idx];
+
     const newComponents = scannedComponents.filter((_, i) => i !== idx);
     setScannedComponents(newComponents);
 
-    const newComponentData = {};
-    newComponents.forEach((comp, i) => {
-      if (componentData[i]) {
-        newComponentData[i] = componentData[i];
-      }
-    });
+    // Remove the corresponding componentData by component ID
+    const newComponentData = { ...componentData };
+    delete newComponentData[removedComponent];
     setComponentData(newComponentData);
   };
 
@@ -280,9 +305,9 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
     try {
       // Prepare arrays for backend
       const components = scannedComponents;
-      const quantities = scannedComponents.map((_, idx) => componentData[idx]?.pcs || null);
-      const expectedWeights = scannedComponents.map((_, idx) => componentData[idx]?.net_kg || null);
-      const actualWeights = expectedWeights; // Same as expected for now
+      const quantities = scannedComponents.map((compId) => componentData[compId]?.pcs || null);
+      const expectedWeights = scannedComponents.map((compId) => componentData[compId]?.net_kg || null);
+      const actualWeights = expectedWeights; // Same as expected
 
       const payload = {
         binId,
@@ -305,7 +330,7 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
 
         setMessage(statusMessage);
         setShowMessageModal(true);
- 
+
       } else {
         setMessage(response.data.error || "Error saving bin information.");
         setShowMessageModal(true);
@@ -323,15 +348,16 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
     setScannedComponents([]);
     setComponentData({});
     setJtcId("");
-    setJtcInfo("");
+    setJtcInfo(null);
     setMessage("");
     setShowMessageModal(false);
     if (onStepChange) onStepChange(0);
   };
 
   const closeMessageModal = () => {
-    setShowMessageModal(false);
-    setMessage("");
+    handleReset();
+    focusActiveInput();
+
   };
 
   const openImageModal = (imageSrc) => {
@@ -340,8 +366,11 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
   };
 
   const closeImageModal = () => {
+
     setShowImageModal(false);
     setSelectedImage("");
+    focusActiveInput();
+
   };
 
   return (
@@ -440,7 +469,7 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
                 {/* Confirm & Save Button */}
                 <div className="w-full lg:w-1/3 flex flex-col justify-center">
                   <div className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm text-center">
-                      <span className="font-semibold">
+                    <span className="font-semibold">
                       {readyCount} / {scannedComponents.length} components ready
                     </span>
                     <button
@@ -465,23 +494,30 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
             {/* Current Bin Display */}
             {binId && (
               <div className="bg-gradient-to-r from-blue-500 to-blue-600 text-white p-6 rounded-xl shadow-lg border-l-8 border-blue-700">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between min-h-[96px]"> {/* 设置最小高度 */}
+                  {/* 左侧图标与 Bin 文字 */}
                   <div className="flex items-center space-x-4">
-                    <div className="bg-white bg-opacity-20 p-3 rounded-full">
+                    <div className="bg-white bg-opacity-20 p-3 rounded-full flex items-center justify-center">
                       <span className="text-2xl">📦</span>
                     </div>
-                    <div>
-                      <h2 className="text-sm font-medium text-blue-100 uppercase tracking-wide">Current Bin</h2>
+                    <div className="flex flex-col justify-center">
+                      <h2 className="text-sm font-medium text-blue-100 uppercase tracking-wide">
+                        Current Bin
+                      </h2>
                       <p className="text-2xl font-bold font-mono">{binId}</p>
                     </div>
                   </div>
-                  <div className="text-right">
+
+                  {/* 右侧统计 */}
+                  <div className="text-right flex flex-col justify-center">
                     <p className="text-sm text-blue-100">Components Scanned</p>
                     <p className="text-3xl font-bold">{scannedComponents.length}</p>
                   </div>
                 </div>
               </div>
             )}
+
+
 
             {/* Scanned Components Display - Review Mode (No Scale Buttons) */}
             {scannedComponents.length > 0 && (
@@ -491,7 +527,7 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
                 </h3>
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   {scannedComponents.map((component, idx) => {
-                    const data = componentData[idx];
+                    const data = componentData[component]; // ✅
                     const ready = data && !data.loading &&
                       isPositiveNumber(data.net_kg) &&
                       isPositiveNumber(data.pcs) &&
@@ -589,7 +625,7 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
                 {/* Readiness Summary and Action Buttons at Bottom */}
                 <div className="text-center mt-8">
                   <div className="mb-4 text-sm">
-               
+
                   </div>
                   <div className="flex justify-center gap-4">
                     <button
@@ -598,7 +634,7 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
                     >
                       ← Back to Scan Components
                     </button>
-               
+
                   </div>
                 </div>
               </div>
@@ -608,11 +644,12 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
 
         {binId && currentStep === 1 && (
           <div className="max-w-7xl mx-auto mb-6">
-            <div className="flex flex-col lg:flex-row gap-6 items-stretch">
+            <div className="flex flex-col lg:flex-row gap-6 items-center"> {/* from items-stretch 改为 items-center */}
 
               {/* Current Bin Display */}
-              <div className="flex-1 bg-gradient-to-r from-blue-500 to-blue-600 text-white p-6 rounded-xl shadow-lg border-l-8 border-blue-700">
-                <div className="flex items-center justify-between">
+              <div className="flex-1 bg-gradient-to-r from-blue-500 to-blue-600 text-white p-6 rounded-xl shadow-lg border-l-8 border-blue-700 min-h-[120px] flex items-center">
+                <div className="flex items-center justify-between w-full">
+                  {/* 左侧图标与 Bin 文字 */}
                   <div className="flex items-center space-x-4">
                     <div className="bg-white bg-opacity-20 p-3 rounded-full">
                       <span className="text-2xl">📦</span>
@@ -622,6 +659,8 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
                       <p className="text-2xl font-bold font-mono">{binId}</p>
                     </div>
                   </div>
+
+                  {/* 右侧统计 */}
                   <div className="text-right">
                     <p className="text-sm text-blue-100">Components Scanned</p>
                     <p className="text-3xl font-bold">{scannedComponents.length}</p>
@@ -640,7 +679,7 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
                 <button
                   onClick={handleNextToReview}
                   disabled={!allComponentsHaveScaleReadings()}
-                  className={`w-full px-6 py-3 rounded-lg font-semibold transition-colors text-sm ${allComponentsHaveScaleReadings()
+                  className={`w-full px-6 py-4 text-base rounded-lg font-semibold transition-colors ${allComponentsHaveScaleReadings()
                     ? "bg-blue-600 text-white hover:bg-blue-700"
                     : "bg-gray-300 text-gray-500 cursor-not-allowed"
                     }`}
@@ -663,7 +702,7 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
               </h3>
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {scannedComponents.map((component, idx) => {
-                  const data = componentData[idx];
+                  const data = componentData[component];
                   const ready = data && !data.loading &&
                     isPositiveNumber(data.net_kg) &&
                     isPositiveNumber(data.pcs) &&
@@ -764,7 +803,7 @@ const ScanBinItems = forwardRef(({ currentStep, onStepChange }, ref) => {
 
                             <div className="mt-3">
                               <button
-                                onClick={() => fetchScaleReading(component, idx)}
+                                onClick={() => fetchScaleReading(component)}
                                 disabled={data?.loading}
                                 className={`w-full px-3 py-2 rounded transition-colors text-xs ${data?.loading
                                   ? "bg-gray-300 text-gray-500 cursor-not-allowed"

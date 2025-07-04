@@ -107,48 +107,48 @@ const AssignBinsToJTC = forwardRef(({ currentStep, onStepChange }, ref) => {
     }
   };
 
-const handleJtcScan = async (barcode) => {
-  if (!barcode.trim()) return;
+  const handleJtcScan = async (barcode) => {
+    if (!barcode.trim()) return;
 
-  // ✅ Step 1: Remove *j prefix and normalize
-  const normalizedJtcId = barcode.trim().replace(/^(\*j)/i, "").toUpperCase();
+    // ✅ Step 1: Remove *j prefix and normalize
+    const normalizedJtcId = barcode.trim().replace(/^(\*j)/i, "").toUpperCase();
 
-  setLoading(true);
-  try {
-    const response = await axios.get(`/api/jtc-info/${normalizedJtcId}`);
-    const jtc = response.data.jtc;
+    setLoading(true);
+    try {
+      const response = await axios.get(`/api/jtc-info/${normalizedJtcId}`);
+      const jtc = response.data.jtc;
 
-    setJtcInfo(jtc);
-    setJtcId(normalizedJtcId);
-    setMessage("");
-    setStep(1);
-    if (onStepChange) onStepChange(1);
-  } catch (error) {
-    setMessage("JTC not found for scanned barcode.");
-    setShowMessageModal(true);
-  } finally {
-    setLoading(false);
-  }
-};
+      setJtcInfo(jtc);
+      setJtcId(normalizedJtcId);
+      setMessage("");
+      setStep(1);
+      if (onStepChange) onStepChange(1);
+    } catch (error) {
+      setMessage("JTC not found for scanned barcode.");
+      setShowMessageModal(true);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // --- HANDLE BIN SCAN ---
- const handleBinScan = async (binId) => {
-  const normalizedBinId = binId.trim().toUpperCase();
-  if (!normalizedBinId) return;
+  const handleBinScan = async (binId) => {
+    const normalizedBinId = binId.trim().toUpperCase();
+    if (!normalizedBinId) return;
 
-  // Check for duplicate (case-insensitive)
-  if (scannedBins.includes(normalizedBinId)) {
-    setMessage(`Bin ${normalizedBinId} is already assigned to this JTC.`);
-    setShowMessageModal(true);
-    return;
-  }
+    // Check for duplicate (case-insensitive)
+    if (scannedBins.includes(normalizedBinId)) {
+      setMessage(`Bin ${normalizedBinId} is already assigned to this JTC.`);
+      setShowMessageModal(true);
+      return;
+    }
 
-  setMessage("");
-  const ok = await fetchBinComponents(normalizedBinId);
-  if (ok) {
-    setScannedBins((prev) => [...prev, normalizedBinId]);
-  }
-};
+    setMessage("");
+    const ok = await fetchBinComponents(normalizedBinId);
+    if (ok) {
+      setScannedBins((prev) => [...prev, normalizedBinId]);
+    }
+  };
 
   // --- MODAL BIN ADD ---
   const confirmAddBin = async () => {
@@ -213,7 +213,7 @@ const handleJtcScan = async (barcode) => {
         setShowMessageModal(true);
 
         // Prepare data to send to print label (use correct field names from your backend)
-      
+
         const labelData = {
           woNumber: jtcInfo.jtc_id,
           partName: jtcInfo.jtc_PartNumber || jtcInfo.jtc_PartNo || "",
@@ -224,7 +224,7 @@ const handleJtcScan = async (barcode) => {
           qty: jtcInfo.jtc_quantityNeeded || "",
           remarks: jtcInfo.jtc_orderNumber || "",
           jtc_barcodeId: jtcInfo.jtc_barcodeId || "",
-          
+
         };
 
         setPrintData(labelData);
@@ -232,11 +232,11 @@ const handleJtcScan = async (barcode) => {
         console.log("Printing labels... bodyData:", labelData);
         // Print labels for each bin
         for (let i = 0; i < scannedBins.length; i++) {
-        await fetch('/api/print-work-order-label', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(labelData)
-        });
+          await fetch('/api/print-work-order-label', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(labelData)
+          });
         }
       } else {
         setMessage(response.data.error || "Error assigning bins.");
@@ -252,7 +252,7 @@ const handleJtcScan = async (barcode) => {
 
   const handlePrintLabel = async () => {
     try {
-    
+
       console.log("Printing labels... printdata:", printData);
 
       await fetch('/api/print-work-order-label', {
@@ -282,10 +282,13 @@ const handleJtcScan = async (barcode) => {
     setShowRemoveConfirmModal(false);
     setBinToConfirmAdd(null);
     if (onStepChange) onStepChange(0);
+
   };
 
   // --- KEYDOWN ---
   const handleKeyDown = (e, type) => {
+    e.preventDefault(); // ⛔ 阻止默认行为（避免触发表单提交或按钮点击）
+
     if (e.key === "Enter") {
       if (type === "jtc") {
         handleJtcScan(e.target.value);
@@ -399,27 +402,48 @@ const handleJtcScan = async (barcode) => {
                 />
               </div>
             </div>
-            <div className="max-w-4xl mx-auto">
-              <div className="bg-gradient-to-r from-purple-500 to-purple-600 text-white p-6 rounded-xl shadow-lg border-l-8 border-purple-700">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-4">
-                    <div className="bg-white bg-opacity-20 p-3 rounded-full">
-                      <span className="text-2xl">🏷️</span>
+
+            <div className="max-w-5xl mx-auto flex items-center justify-between gap-6">
+              {/* JTC Info Card */}
+              <div className="flex-1">
+                <div className="bg-gradient-to-r from-purple-500 to-purple-600 text-white p-6 rounded-xl shadow-lg border-l-8 border-purple-700">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-4">
+                      <div className="bg-white bg-opacity-20 p-3 rounded-full">
+                        <span className="text-2xl">🏷️</span>
+                      </div>
+                      <div>
+                        <h2 className="text-sm font-medium text-purple-100 uppercase tracking-wide">
+                          JTC Work Order
+                        </h2>
+                        <p className="text-2xl font-bold font-mono">
+                          {jtcInfo?.jtc_orderNumber || jtcId}
+                        </p>
+                      </div>
                     </div>
-                    <div>
-                      <h2 className="text-sm font-medium text-purple-100 uppercase tracking-wide">
-                        JTC Work Order
-                      </h2>
-                      <p className="text-2xl font-bold font-mono">{jtcInfo?.jtc_orderNumber || jtcId}</p>
+                    <div className="text-right">
+                      <p className="text-sm text-purple-100">Bins Assigned</p>
+                      <p className="text-3xl font-bold">{scannedBins.length}</p>
                     </div>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-sm text-purple-100">Bins Assigned</p>
-                    <p className="text-3xl font-bold">{scannedBins.length}</p>
                   </div>
                 </div>
               </div>
+
+              {/* Button on the right (centered vertically) */}
+              <div className="flex-shrink-0 flex items-center">
+                <button
+                  onClick={handleConfirmAssignment}
+                  disabled={loading}
+                  className={`px-8 py-4 rounded-xl font-bold text-base transition-colors whitespace-nowrap shadow-md ${loading
+                      ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                      : "bg-green-600 text-white hover:bg-green-700"
+                    }`}
+                >
+                  {loading ? "Saving..." : "✅ Confirm & Print"}
+                </button>
+              </div>
             </div>
+
             {scannedBins.length > 0 && (
               <div className="max-w-7xl mx-auto mt-8">
                 <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
@@ -458,16 +482,7 @@ const handleJtcScan = async (barcode) => {
                 </div>
               </div>
             )}
-            <div className="flex justify-center gap-4 mt-8">
-              <button
-                onClick={handleConfirmAssignment}
-                disabled={loading}
-                className={`px-8 py-3 rounded-lg font-semibold transition-colors ${loading ? "bg-gray-300 text-gray-500 cursor-not-allowed" : "bg-green-600 text-white hover:bg-green-700"
-                  }`}
-              >
-                {loading ? "Saving..." : `✅ Confirm Assignment & Print`}
-              </button>
-            </div>
+            
           </div>
         )}
       </div>
@@ -524,12 +539,14 @@ const handleJtcScan = async (barcode) => {
               {message}
             </p>
             <div className="flex justify-center gap-4">
-              <button
-                onClick={handlePrintLabel}
-                className="px-6 py-2 bg-green-600 text-white rounded-lg shadow-md hover:bg-green-700 transition-colors font-semibold"
-              >
-                🖨️ Print
-              </button>
+              {jtcInfo && (
+                <button
+                  onClick={handlePrintLabel}
+                  className="px-6 py-2 bg-green-600 text-white rounded-lg shadow-md hover:bg-green-700 transition-colors font-semibold"
+                >
+                  🖨️ Print
+                </button>
+              )}
               <button
                 onClick={closeMessageModal}
                 className="px-6 py-2 bg-blue-600 text-white rounded-lg shadow-md hover:bg-blue-700 transition-colors font-semibold"
