@@ -383,23 +383,79 @@ const ScanBinItems2 = forwardRef(({ currentStep, onStepChange }, ref) => {
     setMismatchCounts((prev) => ({ ...prev, [componentId]: 0 }));
   };
 
-const fetchScaleReading = async (componentId) => {
-  // Set loading state
-  setComponentData(prev => ({
-    ...prev,
-    [componentId]: {
-      ...(prev[componentId] || {}),
-      loading: true,
-      error: null,
-    }
-  }));
+  const fetchScaleReading = async (componentId) => {
+    // Set loading state
+    setComponentData(prev => ({
+      ...prev,
+      [componentId]: {
+        ...(prev[componentId] || {}),
+        loading: true,
+        error: null,
+      }
+    }));
 
-  try {
-    const response = await axios.get("http://localhost:8000/get_weight");
-    console.log("Scale response:", response.data);
+    try {
+      const response = await axios.get("http://localhost:8000/get_weight");
+      console.log("Scale response:", response.data);
 
-    if (response.status === 204 || !response.data) {
-      // No scale data case — preserve previous values
+      if (response.status === 204 || !response.data) {
+        // No scale data case — preserve previous values
+        setComponentData(prev => ({
+          ...prev,
+          [componentId]: {
+            ...(prev[componentId] || {}),
+            loading: false,
+            net_kg: null,
+            pcs: null,
+            unit_weight_g: null,
+            timestamp: null,
+            serial_no: null,
+            error: "No scale data available",
+            difference: null,
+            discrepancy_type: null,
+          }
+        }));
+        return;
+      }
+
+      const scaleData = response.data;
+
+      const validNetKg = isPositiveNumber(scaleData.net_kg) ? scaleData.net_kg : null;
+      const validPcs = isPositiveNumber(scaleData.pcs) ? scaleData.pcs : null;
+      const validUnitWeight = isPositiveNumber(scaleData.unit_weight_g) ? scaleData.unit_weight_g : null;
+
+      const expectedQty = componentData[componentId]?.expected_quantity_per_bin || 50;
+
+      // Calculate discrepancy
+      const difference = validPcs !== null ? validPcs - expectedQty : null;
+      const discrepancy_type = difference === 0 ? "OK" : (difference < 0 ? "Shortage" : "Excess");
+
+      // Update mismatch count
+      setMismatchCounts(prev => {
+        const currentCount = prev[componentId] || 0;
+        return discrepancy_type === "OK"
+          ? { ...prev, [componentId]: 0 }
+          : { ...prev, [componentId]: currentCount + 1 };
+      });
+
+      // Set updated component data with preserved values
+      setComponentData(prev => ({
+        ...prev,
+        [componentId]: {
+          ...(prev[componentId] || {}),
+          loading: false,
+          net_kg: validNetKg,
+          pcs: validPcs,
+          unit_weight_g: validUnitWeight,
+          timestamp: scaleData.timestamp || null,
+          serial_no: scaleData.serial_no || null,
+          error: (validNetKg && validPcs && validUnitWeight) ? null : "Invalid weight reading",
+          difference,
+          discrepancy_type,
+        }
+      }));
+    } catch (error) {
+      console.error("Error fetching scale reading:", error);
       setComponentData(prev => ({
         ...prev,
         [componentId]: {
@@ -410,69 +466,13 @@ const fetchScaleReading = async (componentId) => {
           unit_weight_g: null,
           timestamp: null,
           serial_no: null,
-          error: "No scale data available",
+          error: "Failed to get scale reading",
           difference: null,
           discrepancy_type: null,
         }
       }));
-      return;
     }
-
-    const scaleData = response.data;
-
-    const validNetKg = isPositiveNumber(scaleData.net_kg) ? scaleData.net_kg : null;
-    const validPcs = isPositiveNumber(scaleData.pcs) ? scaleData.pcs : null;
-    const validUnitWeight = isPositiveNumber(scaleData.unit_weight_g) ? scaleData.unit_weight_g : null;
-
-    const expectedQty = componentData[componentId]?.expected_quantity_per_bin || 50;
-
-    // Calculate discrepancy
-    const difference = validPcs !== null ? validPcs - expectedQty : null;
-    const discrepancy_type = difference === 0 ? "OK" : (difference < 0 ? "Shortage" : "Excess");
-
-    // Update mismatch count
-    setMismatchCounts(prev => {
-      const currentCount = prev[componentId] || 0;
-      return discrepancy_type === "OK"
-        ? { ...prev, [componentId]: 0 }
-        : { ...prev, [componentId]: currentCount + 1 };
-    });
-
-    // Set updated component data with preserved values
-    setComponentData(prev => ({
-      ...prev,
-      [componentId]: {
-        ...(prev[componentId] || {}),
-        loading: false,
-        net_kg: validNetKg,
-        pcs: validPcs,
-        unit_weight_g: validUnitWeight,
-        timestamp: scaleData.timestamp || null,
-        serial_no: scaleData.serial_no || null,
-        error: (validNetKg && validPcs && validUnitWeight) ? null : "Invalid weight reading",
-        difference,
-        discrepancy_type,
-      }
-    }));
-  } catch (error) {
-    console.error("Error fetching scale reading:", error);
-    setComponentData(prev => ({
-      ...prev,
-      [componentId]: {
-        ...(prev[componentId] || {}),
-        loading: false,
-        net_kg: null,
-        pcs: null,
-        unit_weight_g: null,
-        timestamp: null,
-        serial_no: null,
-        error: "Failed to get scale reading",
-        difference: null,
-        discrepancy_type: null,
-      }
-    }));
-  }
-};
+  };
 
   // Check if quantity matches expected quantity exactly
   const isQuantityCorrect = (componentId) => {
@@ -954,8 +954,13 @@ const fetchScaleReading = async (componentId) => {
                       const currentQty = prev[componentId]?.pcs ?? 0;
                       const newQty = Math.max(0, currentQty + delta);
                       const expectedQty = prev[componentId]?.expected_quantity_per_bin ?? 0;
+                      const unitWeight = parseFloat(prev[componentId]?.unit_weight_g ?? 0);
                       const difference = newQty - expectedQty;
                       const discrepancy_type = difference === 0 ? "OK" : difference < 0 ? "Shortage" : "Excess";
+
+                      const newNetKg = unitWeight && newQty
+                        ? parseFloat(((newQty * unitWeight) / 1000).toFixed(3))
+                        : null;
 
                       return {
                         ...prev,
@@ -964,6 +969,7 @@ const fetchScaleReading = async (componentId) => {
                           pcs: newQty,
                           difference,
                           discrepancy_type,
+                          net_kg: newNetKg,
                           error: null,
                         },
                       };
@@ -974,12 +980,17 @@ const fetchScaleReading = async (componentId) => {
 
                   const manualQuantityChange = (componentId, value) => {
                     const num = Number(value);
-                    if (isNaN(num) || num < 0) return; // ignore invalid input
+                    if (isNaN(num) || num < 0) return;
 
                     setComponentData((prev) => {
                       const expectedQty = prev[componentId]?.expected_quantity_per_bin ?? 0;
+                      const unitWeight = parseFloat(prev[componentId]?.unit_weight_g ?? 0);
                       const difference = num - expectedQty;
                       const discrepancy_type = difference === 0 ? "OK" : difference < 0 ? "Shortage" : "Excess";
+
+                      const newNetKg = unitWeight && num
+                        ? parseFloat(((num * unitWeight) / 1000).toFixed(3))
+                        : null;
 
                       return {
                         ...prev,
@@ -988,6 +999,7 @@ const fetchScaleReading = async (componentId) => {
                           pcs: num,
                           difference,
                           discrepancy_type,
+                          net_kg: newNetKg,
                           error: null,
                         },
                       };
@@ -1103,42 +1115,73 @@ const fetchScaleReading = async (componentId) => {
                                 <span className="font-semibold">{data.unit_weight_g != null ? `${data.unit_weight_g}g` : "N/A"}</span>
                               </div>
 
-                              {/* Quantity with conditional +/- buttons or plain text */}
-                              <div className="flex justify-between items-center">
-                                <span className="text-gray-600 font-medium">Quantity:</span>
-                                {(!quantityCorrect && !data.require_scale) ||
-                                  (data.require_scale && (data.discrepancy_type === "Shortage" || data.discrepancy_type === "Excess")) ? (
-                                  <div className="flex items-center space-x-2 max-w-xs">
-                                    <button
-                                      type="button"
-                                      onClick={() => adjustQuantity(component, -1)}
-                                      disabled={(data.pcs ?? 0) <= 0}
-                                      className="px-2 py-1 bg-gray-300 rounded disabled:opacity-50"
-                                      title="Decrease quantity"
-                                    >
-                                      -
-                                    </button>
-                                    <input
-                                      type="number"
-                                      min="0"
-                                      value={data.pcs ?? ""}
-                                      onChange={(e) => manualQuantityChange(component, e.target.value)}
-                                      className="w-16 text-center border rounded"
-                                      aria-label={`Quantity for component ${component}`}
-                                    />
-                                    <button
-                                      type="button"
-                                      onClick={() => adjustQuantity(component, 1)}
-                                      className="px-2 py-1 bg-gray-300 rounded"
-                                      title="Increase quantity"
-                                    >
-                                      +
-                                    </button>
-                                  </div>
-                                ) : (
-                                  <span className="font-semibold">{data.pcs != null ? `${data.pcs} pcs` : "N/A"}</span>
-                                )}
-                              </div>
+                            {/* Quantity with conditional +/- buttons or plain text */}
+<div className="flex justify-between items-center">
+  <span className="text-gray-600 font-medium">Quantity:</span>
+  {!data.require_scale ? (
+    // Always show adjustment buttons if no scale required
+    <div className="flex items-center space-x-2 max-w-xs">
+      <button
+        type="button"
+        onClick={() => adjustQuantity(component, -1)}
+        disabled={(data.pcs ?? 0) <= 0}
+        className="px-2 py-1 bg-gray-300 rounded disabled:opacity-50"
+        title="Decrease quantity"
+      >
+        -
+      </button>
+      <input
+        type="number"
+        min="0"
+        value={data.pcs ?? ""}
+        onChange={(e) => manualQuantityChange(component, e.target.value)}
+        className="w-16 text-center border rounded"
+        aria-label={`Quantity for component ${component}`}
+      />
+      <button
+        type="button"
+        onClick={() => adjustQuantity(component, 1)}
+        className="px-2 py-1 bg-gray-300 rounded"
+        title="Increase quantity"
+      >
+        +
+      </button>
+    </div>
+  ) : (
+    // For scale required components, show adjustment buttons only if quantity incorrect
+    (data.discrepancy_type === "Shortage" || data.discrepancy_type === "Excess") ? (
+      <div className="flex items-center space-x-2 max-w-xs">
+        <button
+          type="button"
+          onClick={() => adjustQuantity(component, -1)}
+          disabled={(data.pcs ?? 0) <= 0}
+          className="px-2 py-1 bg-gray-300 rounded disabled:opacity-50"
+          title="Decrease quantity"
+        >
+          -
+        </button>
+        <input
+          type="number"
+          min="0"
+          value={data.pcs ?? ""}
+          onChange={(e) => manualQuantityChange(component, e.target.value)}
+          className="w-16 text-center border rounded"
+          aria-label={`Quantity for component ${component}`}
+        />
+        <button
+          type="button"
+          onClick={() => adjustQuantity(component, 1)}
+          className="px-2 py-1 bg-gray-300 rounded"
+          title="Increase quantity"
+        >
+          +
+        </button>
+      </div>
+    ) : (
+      <span className="font-semibold">{data.pcs != null ? `${data.pcs} pcs` : "N/A"}</span>
+    )
+  )}
+</div>
 
                               <div className="flex justify-between">
                                 <span className="text-gray-600 font-medium">Expected Quantity:</span>
