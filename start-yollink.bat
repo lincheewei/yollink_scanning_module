@@ -1,36 +1,18 @@
 @echo off
-setlocal
+cd /d "%~dp0"
 
-set LOG=%TEMP%\yollink-startup.log
-echo [%date% %time%] Script started > "%LOG%"
-
-:: Go to this script's directory
-cd /d "%~dp0" || (
-    echo [%date% %time%] Failed to cd to script folder >> "%LOG%"
-    exit /b
-)
-
-:: Check if package.json exists
+:: Check if we're in the project folder
 if not exist package.json (
-    echo [%date% %time%] ERROR: package.json not found >> "%LOG%"
+    echo ERROR: Not in project folder. package.json not found.
+    pause
     exit /b
 )
 
-:: Start npm run dev (log output separately)
-echo [%date% %time%] Starting npm dev >> "%LOG%"
-start "" /min cmd /k "cd /d \"%~dp0\" && \"C:\Program Files\nodejs\npm.cmd\" run dev >> \"%TEMP%\yollink-npm.log\" 2>&1"
+echo [Yollink] Starting dev server...
+start /min cmd /k "npm run dev"
 
-:: Wait before opening browser
+:: Wait for server to initialize
 timeout /t 8 >nul
 
 :: Launch Chrome in kiosk mode
-set "CHROME_PATH=C:\Program Files\Google\Chrome\Application\chrome.exe"
-if exist "%CHROME_PATH%" (
-    echo [%date% %time%] Launching Chrome >> "%LOG%"
-    start "" "%CHROME_PATH%" --kiosk "http://localhost:5173"
-) else (
-    echo [%date% %time%] Chrome not found at %CHROME_PATH% >> "%LOG%"
-)
-
-echo [%date% %time%] Script ended >> "%LOG%"
-endlocal
+start "" "C:\Program Files\Google\Chrome\Application\chrome.exe" --kiosk "http://localhost:5173"
