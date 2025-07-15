@@ -15,4 +15,6 @@ start /min cmd /k "npm run dev"
 timeout /t 8 >nul
 
 :: Launch Chrome in kiosk mode
-start "" "C:\Program Files\Google\Chrome\Application\chrome.exe" --kiosk "http://localhost:5173"
+@REM start "" "C:\Program Files\Google\Chrome\Application\chrome.exe" --kiosk "http://localhost:5173"
+
+pause
