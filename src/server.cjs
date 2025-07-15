@@ -517,7 +517,7 @@ app.post('/api/print-work-order-label', async (req, res) => {
 
   try {
     const response = await axios.post(
-      'http://10.0.120.115:9999/print-label',
+      'http://localhost:9999/print-label',
       { tspl },
       { timeout: 5000 }
     );
