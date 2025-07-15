@@ -677,8 +677,8 @@ app.post('/api/return-bins-to-warehouse', async (req, res) => {
          SET location = $1,
              jtc = NULL,
              status = $2,
-             last_updated = NOW()
-             quantity_check_status = 'unchhecked',
+             last_updated = NOW(),
+             quantity_check_status = 'unchecked'
          WHERE bin_id = $3`,
         ['WAREHOUSE', 'Returned to Warehouse', binId]
       );
