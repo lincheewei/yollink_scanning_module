@@ -11,8 +11,8 @@ if not exist package.json (
 echo [Yollink] Starting dev server...
 start /min cmd /k "npm run dev"
 
-timeout /t 20 >nul   :: ⬅ Increase wait to 20 seconds
+@REM timeout /t 20 >nul   :: ⬅ Increase wait to 20 seconds
 
 
 :: Launch Chrome in kiosk mode
-start "" "C:\Program Files\Google\Chrome\Application\chrome.exe" --kiosk "http://localhost:5173"
+@REM start "" "C:\Program Files\Google\Chrome\Application\chrome.exe" --kiosk "http://localhost:5173"
