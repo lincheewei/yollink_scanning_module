@@ -383,20 +383,76 @@ const ScanBinItems2 = forwardRef(({ currentStep, onStepChange }, ref) => {
     setMismatchCounts((prev) => ({ ...prev, [componentId]: 0 }));
   };
 
-const fetchScaleReading = async (componentId) => {
-  setComponentData(prev => ({
-    ...prev,
-    [componentId]: {
-      ...(prev[componentId] || {}),
-      loading: true,
-      error: null,
-    }
-  }));
+  const fetchScaleReading = async (componentId) => {
+    setComponentData(prev => ({
+      ...prev,
+      [componentId]: {
+        ...(prev[componentId] || {}),
+        loading: true,
+        error: null,
+      }
+    }));
 
-  try {
-    const response = await axios.get("http://localhost:8000/get_weight");
+    try {
+      const response = await axios.get("http://localhost:8000/get_weight");
+      console.log("Scale response:", response.data);
 
-    if (response.status === 204 || !response.data) {
+      if (response.status === 204 || !response.data) {
+        setComponentData(prev => ({
+          ...prev,
+          [componentId]: {
+            componentId,
+            loading: false,
+            net_kg: null,
+            pcs: null,
+            unit_weight_g: null,
+            timestamp: null,
+            serial_no: null,
+            error: "No scale data available"
+          }
+        }));
+        return;
+      }
+
+      const scaleData = response.data;
+
+      const validNetKg = isPositiveNumber(scaleData.net_kg) ? scaleData.net_kg : null;
+      const validPcs = isPositiveNumber(scaleData.pcs) ? scaleData.pcs : null;
+      const validUnitWeight = isPositiveNumber(scaleData.unit_weight_g) ? scaleData.unit_weight_g : null;
+
+      const expectedQty = componentData[componentId]?.expected_quantity_per_bin || 50; // fallback 50
+
+      // Calculate discrepancy
+      const difference = validPcs !== null ? validPcs - expectedQty : null;
+      const discrepancy_type = difference === 0 ? "OK" : (difference < 0 ? "Shortage" : "Excess");
+
+      // Update mismatch count
+      setMismatchCounts(prev => {
+        const currentCount = prev[componentId] || 0;
+        if (discrepancy_type === "OK") {
+          return { ...prev, [componentId]: 0 };
+        } else {
+          return { ...prev, [componentId]: currentCount + 1 };
+        }
+      });
+
+      setComponentData(prev => ({
+        ...prev,
+        [componentId]: {
+          componentId,
+          loading: false,
+          net_kg: validNetKg,
+          pcs: validPcs,
+          unit_weight_g: validUnitWeight,
+          timestamp: scaleData.timestamp || null,
+          serial_no: scaleData.serial_no || null,
+          error: (validNetKg && validPcs && validUnitWeight) ? null : "Invalid weight reading",
+          difference,
+          discrepancy_type,
+        }
+      }));
+    } catch (error) {
+      console.error("Error fetching scale reading:", error);
       setComponentData(prev => ({
         ...prev,
         [componentId]: {
@@ -407,68 +463,13 @@ const fetchScaleReading = async (componentId) => {
           unit_weight_g: null,
           timestamp: null,
           serial_no: null,
-          error: "No scale data available"
+          error: "Failed to get scale reading",
+          difference: null,
+          discrepancy_type: null,
         }
       }));
-      return;
     }
-
-    const scaleData = response.data;
-
-    const validNetKg = isPositiveNumber(scaleData.net_kg) ? scaleData.net_kg : null;
-    const validPcs = isPositiveNumber(scaleData.pcs) ? scaleData.pcs : null;
-    const validUnitWeight = isPositiveNumber(scaleData.unit_weight_g) ? scaleData.unit_weight_g : null;
-
-    const expectedQty = componentData[componentId]?.expected_quantity_per_bin || 50; // fallback 50
-
-    // Calculate discrepancy
-    const difference = validPcs !== null ? validPcs - expectedQty : null;
-    const discrepancy_type = difference === 0 ? "OK" : (difference < 0 ? "Shortage" : "Excess");
-
-    // Update mismatch count
-    setMismatchCounts(prev => {
-      const currentCount = prev[componentId] || 0;
-      if (discrepancy_type === "OK") {
-        return { ...prev, [componentId]: 0 };
-      } else {
-        return { ...prev, [componentId]: currentCount + 1 };
-      }
-    });
-
-    setComponentData(prev => ({
-      ...prev,
-      [componentId]: {
-        componentId,
-        loading: false,
-        net_kg: validNetKg,
-        pcs: validPcs,
-        unit_weight_g: validUnitWeight,
-        timestamp: scaleData.timestamp || null,
-        serial_no: scaleData.serial_no || null,
-        error: (validNetKg && validPcs && validUnitWeight) ? null : "Invalid weight reading",
-        difference,
-        discrepancy_type,
-      }
-    }));
-  } catch (error) {
-    console.error("Error fetching scale reading:", error);
-    setComponentData(prev => ({
-      ...prev,
-      [componentId]: {
-        componentId,
-        loading: false,
-        net_kg: null,
-        pcs: null,
-        unit_weight_g: null,
-        timestamp: null,
-        serial_no: null,
-        error: "Failed to get scale reading",
-        difference: null,
-        discrepancy_type: null,
-      }
-    }));
-  }
-};
+  };
 
   // Check if quantity matches expected quantity exactly
   const isQuantityCorrect = (componentId) => {
@@ -721,38 +722,38 @@ const fetchScaleReading = async (componentId) => {
 
 
   const resetAfterSuccess = () => {
-  setBinId("");
-  setScannedComponents([]);
-  setComponentData(prev => {
-    // Keep only expected_quantity_per_bin and component_id for each component
-    const preservedData = {};
-    Object.entries(prev).forEach(([compId, data]) => {
-      if (data.expected_quantity_per_bin != null) {
-        preservedData[compId] = {
-          component_id: compId,
-          expected_quantity_per_bin: data.expected_quantity_per_bin,
-          // Optionally keep component_name if you have it
-          component_name: data.component_name || null,
-          // Clear dynamic fields
-          pcs: null,
-          net_kg: null,
-          unit_weight_g: null,
-          error: null,
-          difference: null,
-          discrepancy_type: null,
-          loading: false,
-          needsScaleReading: data.needsScaleReading || false,
-          require_scale: data.require_scale || false,
-        };
-      }
+    setBinId("");
+    setScannedComponents([]);
+    setComponentData(prev => {
+      // Keep only expected_quantity_per_bin and component_id for each component
+      const preservedData = {};
+      Object.entries(prev).forEach(([compId, data]) => {
+        if (data.expected_quantity_per_bin != null) {
+          preservedData[compId] = {
+            component_id: compId,
+            expected_quantity_per_bin: data.expected_quantity_per_bin,
+            // Optionally keep component_name if you have it
+            component_name: data.component_name || null,
+            // Clear dynamic fields
+            pcs: null,
+            net_kg: null,
+            unit_weight_g: null,
+            error: null,
+            difference: null,
+            discrepancy_type: null,
+            loading: false,
+            needsScaleReading: data.needsScaleReading || false,
+            require_scale: data.require_scale || false,
+          };
+        }
+      });
+      return preservedData;
     });
-    return preservedData;
-  });
-  setJtcId("");
-  setJtcInfo(null);
-  setMessage("");
-  setShowMessageModal(false);
-  if (onStepChange) onStepChange(0);
+    setJtcId("");
+    setJtcInfo(null);
+    setMessage("");
+    setShowMessageModal(false);
+    if (onStepChange) onStepChange(0);
   };
 
 
