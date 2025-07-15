@@ -5,52 +5,68 @@ import ScanComponentWeight from "./components/ScanComponentWeight";
 import AssignBinsToJTC from "./components/AssignBinsToJTC";
 import ScanBinItems from "./components/ScanBinItems";
 import ScanToReleaseBin from "./components/ScanToReleaseBin";
+import ScanBinItems2 from "./components/ScanBinItems2";
+import ScanToWarehouseReturn from "./components/ScanToWarehouseReturn";
 
 import { Buffer } from "buffer";
 window.Buffer = window.Buffer || Buffer;
 
+
+
 // Color map for each tab - Production-friendly, clear color coding with brighter indicator colors
 const tabColors = {
-  assign: { 
-    icon: "📦", 
-    color: "blue", 
-    bg: "bg-blue-50", 
-    border: "border-blue-600", 
-    text: "text-blue-700", 
-    step: "bg-blue-600", 
+  assign: {
+    icon: "📦",
+    color: "blue",
+    bg: "bg-blue-50",
+    border: "border-blue-600",
+    text: "text-blue-700",
+    step: "bg-blue-600",
     stepBorder: "border-blue-600",
     progressBg: "bg-blue-600",
     indicator: "#60a5fa" // blue-400 - brighter blue
   },
-  scan: { 
-    icon: "🔍", 
-    color: "green", 
-    bg: "bg-green-50", 
-    border: "border-green-600", 
-    text: "text-green-700", 
-    step: "bg-green-600", 
+  scan: {
+    icon: "🔍",
+    color: "green",
+    bg: "bg-green-50",
+    border: "border-green-600",
+    text: "text-green-700",
+    step: "bg-green-600",
     stepBorder: "border-green-600",
     progressBg: "bg-green-600",
     indicator: "#34d399" // green-400 - brighter green
   },
-  release: { 
-    icon: "📤", 
-    color: "purple", 
-    bg: "bg-purple-50", 
-    border: "border-purple-600", 
-    text: "text-purple-700", 
-    step: "bg-purple-600", 
+  release: {
+    icon: "📤",
+    color: "purple",
+    bg: "bg-purple-50",
+    border: "border-purple-600",
+    text: "text-purple-700",
+    step: "bg-purple-600",
     stepBorder: "border-purple-600",
     progressBg: "bg-purple-600",
     indicator: "#a78bfa" // purple-400 - brighter purple
   },
-  scanComponentWeight: { 
-    icon: "⚖️", 
-    color: "orange", 
-    bg: "bg-orange-50", 
-    border: "border-orange-600", 
-    text: "text-orange-700", 
-    step: "bg-orange-600", 
+  warehouseReturn: {
+    icon: "🏭",
+    color: "teal",
+    bg: "bg-teal-50",
+    border: "border-teal-600",
+    text: "text-teal-700",
+    step: "bg-teal-600",
+    stepBorder: "border-teal-600",
+    progressBg: "bg-teal-600",
+    indicator: "#14b8a6" // teal-400
+  },
+
+  scanComponentWeight: {
+    icon: "⚖️",
+    color: "orange",
+    bg: "bg-orange-50",
+    border: "border-orange-600",
+    text: "text-orange-700",
+    step: "bg-orange-600",
     stepBorder: "border-orange-600",
     progressBg: "bg-orange-600",
     indicator: "#fdba74" // orange-300 - brighter orange
@@ -154,7 +170,17 @@ const ProcessStepsCard = ({ activeTab, onImageClick, currentStep, onStepClick, o
         image: "/images/weight-step3-record.jpg",
         placeholder: "https://placehold.co/200x200/f97316/ffffff?text=Record"
       }
-    ]
+    ],
+    warehouseReturn: [
+      {
+        id: 0,
+        title: "Scan Bin for Return",
+        image: "src/assets/bin-qr.png",
+        placeholder: "https://placehold.co/200x200/14b8a6/ffffff?text=Bin"
+      },
+
+    
+    ],
   };
 
   const currentSteps = processSteps[activeTab];
@@ -174,7 +200,8 @@ const ProcessStepsCard = ({ activeTab, onImageClick, currentStep, onStepClick, o
       assign: "Process Steps",
       scan: "Process Steps",
       release: "Process Steps",
-      scanComponentWeight: "Process Steps"
+      scanComponentWeight: "Process Steps",
+      warehouseReturn: "Process Steps"
     };
     return titles[tab] || "Process Steps";
   };
@@ -193,15 +220,15 @@ const ProcessStepsCard = ({ activeTab, onImageClick, currentStep, onStepClick, o
               const isClickable = activeTab === 'scan' || activeTab === 'assign' || activeTab === 'release';
               const isActive = status === 'active';
               const isCompleted = status === 'completed';
-              
+
               return (
                 <div
                   key={step.id}
                   className={`
                     flex items-stretch p-4 rounded-lg transition-all duration-200 border-2 relative
-                    ${isActive ? `${tabColor.stepBorder} ${tabColor.bg} shadow-md` : 
+                    ${isActive ? `${tabColor.stepBorder} ${tabColor.bg} shadow-md` :
                       isCompleted ? "border-green-300 bg-green-50" :
-                      "border-gray-200 bg-gray-50"}
+                        "border-gray-200 bg-gray-50"}
                     ${isClickable ? "cursor-pointer hover:shadow-lg" : ""}
                   `}
                   onClick={() => {
@@ -211,16 +238,15 @@ const ProcessStepsCard = ({ activeTab, onImageClick, currentStep, onStepClick, o
                   }}
                   style={{ cursor: isClickable ? 'pointer' : 'default', minHeight: '140px' }}
                 >
-                        {/* Status indicator */}
-                      {isActive && (
-                       <div className="absolute top-2 right-2 w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center animate-pulse z-10">
-      <span className="text-white text-xs">●</span>
-    </div>
-                      )}
+                  {/* Status indicator */}
+                  {isActive && (
+                    <div className="absolute top-2 right-2 w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center animate-pulse z-10">
+                      <span className="text-white text-xs">●</span>
+                    </div>
+                  )}
                   {/* Step Number - Top Left */}
-                  <div className={`absolute top-2 left-2 w-8 h-8 ${
-                    isCompleted ? 'bg-green-600' : tabColor.step
-                  } text-white rounded-full flex items-center justify-center text-sm font-bold z-10`}>
+                  <div className={`absolute top-2 left-2 w-8 h-8 ${isCompleted ? 'bg-green-600' : tabColor.step
+                    } text-white rounded-full flex items-center justify-center text-sm font-bold z-10`}>
                     {isCompleted ? '✓' : step.id + 1}
                   </div>
 
@@ -230,7 +256,7 @@ const ProcessStepsCard = ({ activeTab, onImageClick, currentStep, onStepClick, o
                       <img
                         src={step.image}
                         alt={step.title}
-  className="w-50 h-40 rounded-lg border-2 border-gray-200 cursor-pointer hover:shadow-xl hover:border-blue-300 transition-all duration-200 object-cover"
+                        className="w-50 h-40 rounded-lg border-2 border-gray-200 cursor-pointer hover:shadow-xl hover:border-blue-300 transition-all duration-200 object-cover"
                         onClick={(e) => {
                           e.stopPropagation();
                           onImageClick(step.image);
@@ -239,15 +265,14 @@ const ProcessStepsCard = ({ activeTab, onImageClick, currentStep, onStepClick, o
                           e.target.src = step.placeholder;
                         }}
                       />
-                
+
                     </div>
                   </div>
 
                   {/* Text Area - 60% */}
                   <div className="flex-1 pl-4 flex flex-col justify-center">
-                    <div className={`font-semibold text-gray-800 text-xl leading-tight ${
-                      isActive ? tabColor.text : isCompleted ? 'text-green-700' : ''
-                    }`}>
+                    <div className={`font-semibold text-gray-800 text-xl leading-tight ${isActive ? tabColor.text : isCompleted ? 'text-green-700' : ''
+                      }`}>
                       {step.title}
                       {isActive && <span className="ml-2 text-blue-600 text-lg"></span>}
                     </div>
@@ -260,7 +285,7 @@ const ProcessStepsCard = ({ activeTab, onImageClick, currentStep, onStepClick, o
               );
             })}
           </div>
-          
+
           {/* Progress indicator */}
           <div className="mt-4 pt-4 border-t border-gray-200">
             <div className="text-xs text-gray-500 text-center">
@@ -272,7 +297,7 @@ const ProcessStepsCard = ({ activeTab, onImageClick, currentStep, onStepClick, o
             </div>
             {(activeTab === 'scan' || activeTab === 'assign' || activeTab === 'release') && (
               <div className="w-full bg-gray-200 rounded-full h-2 mt-2">
-                <div 
+                <div
                   className={`${tabColor.progressBg} h-2 rounded-full transition-all duration-300`}
                   style={{ width: `${((currentStep + 1) / currentSteps.length) * 100}%` }}
                 ></div>
@@ -333,7 +358,7 @@ const CollapsibleNavbar = ({ activeTab, onTabChange, tabs }) => {
     <>
       {/* Horizontal Indicator Line Animation Styles */}
       <style dangerouslySetInnerHTML={{ __html: indicatorLineStyles }} />
-      
+
       <nav className="bg-white shadow-lg mb-4 rounded-lg">
         <div className="px-6 py-4">
           {/* Header with Toggle Button (Always Visible) */}
@@ -344,19 +369,19 @@ const CollapsibleNavbar = ({ activeTab, onTabChange, tabs }) => {
                 className="indicator-line"
                 style={{ "--indicator-color": tabColor.indicator }}
               />
-              
+
               {/* Main Title */}
               <h1 className={`text-4xl lg:text-5xl font-extrabold uppercase tracking-widest text-center ${tabColor.text}`}>
                 {tabColor.icon} {getCurrentTabTitle()}
               </h1>
-              
+
               {/* Right Horizontal Indicator Line */}
               <span
                 className="indicator-line"
                 style={{ "--indicator-color": tabColor.indicator }}
               />
             </div>
-            
+
             <button
               onClick={() => setIsOpen(!isOpen)}
               className="flex items-center space-x-2 px-4 py-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 ml-4"
@@ -365,9 +390,9 @@ const CollapsibleNavbar = ({ activeTab, onTabChange, tabs }) => {
               <span className="text-sm font-medium hidden sm:inline">
                 {isOpen ? 'Hide Menu' : 'Show Menu'}
               </span>
-              <svg className="w-6 h-6 transition-transform duration-200" 
-                   style={{ transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)' }}
-                   fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-6 h-6 transition-transform duration-200"
+                style={{ transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)' }}
+                fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 {isOpen ? (
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 ) : (
@@ -378,9 +403,8 @@ const CollapsibleNavbar = ({ activeTab, onTabChange, tabs }) => {
           </div>
 
           {/* Collapsible Navigation Content (Always Collapsible) */}
-          <div className={`transition-all duration-300 ease-in-out overflow-hidden ${
-            isOpen ? 'max-h-96 opacity-100 mt-6' : 'max-h-0 opacity-0'
-          }`}>
+          <div className={`transition-all duration-300 ease-in-out overflow-hidden ${isOpen ? 'max-h-96 opacity-100 mt-6' : 'max-h-0 opacity-0'
+            }`}>
             {/* Navigation Tabs */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-4">
               {tabs.map(({ key, label }) => {
@@ -440,16 +464,15 @@ export default function App() {
   const [scanCurrentStep, setScanCurrentStep] = useState(0);
   const [assignCurrentStep, setAssignCurrentStep] = useState(0);
   const [releaseCurrentStep, setReleaseCurrentStep] = useState(0);
-
+  const [warehouseReturnCurrentStep, setWarehouseReturnCurrentStep] = useState(0);
   // Create refs for each component
   const assignBinsRef = useRef();
   const scanBinItemsRef = useRef();
   const scanToReleaseRef = useRef();
-
+  const scanToWarehouseReturnRef = useRef();
   const handleImageClick = (imageSrc) => {
     setModalImg(imageSrc);
   };
-
   const handleStepClick = (stepId) => {
     if (tab === 'scan') {
       setScanCurrentStep(stepId);
@@ -457,6 +480,8 @@ export default function App() {
       setAssignCurrentStep(stepId);
     } else if (tab === 'release') {
       setReleaseCurrentStep(stepId);
+    } else if (tab === 'warehouseReturn') {
+      setWarehouseReturnCurrentStep(stepId);
     }
   };
 
@@ -468,32 +493,35 @@ export default function App() {
       setAssignCurrentStep(0);
     } else if (newTab === 'release') {
       setReleaseCurrentStep(0);
+    } else if (newTab === 'warehouseReturn') {
+      setWarehouseReturnCurrentStep(0);
     }
   };
 
   const handleResetAll = () => {
-    // Reset step counters
     setScanCurrentStep(0);
     setAssignCurrentStep(0);
     setReleaseCurrentStep(0);
+    setWarehouseReturnCurrentStep(0);
 
-    // Call reset on all components (even if not currently active)
     assignBinsRef.current?.resetComponent();
     scanBinItemsRef.current?.resetComponent();
     scanToReleaseRef.current?.resetComponent();
+    scanToWarehouseReturnRef.current?.resetComponent();
   };
 
   const tabs = [
     { key: "assign", label: "Assign Bins to JTC" },
     { key: "scan", label: "Scan Bin Items" },
-    { key: "release", label: "Scan to Release Bin" },
+    { key: "release", label: "Warehouse to Production" },
+    { key: "warehouseReturn", label: "Production to Warehouse" },  // <-- new tab
   ];
 
   return (
     <div className="min-h-screen bg-gray-100 p-2 flex flex-col">
       <div className="flex-1 flex flex-col">
         {/* Collapsible Navigation Bar with Horizontal Breathing Indicator Lines */}
-        <CollapsibleNavbar 
+        <CollapsibleNavbar
           activeTab={tab}
           onTabChange={handleTabChange}
           tabs={tabs}
@@ -502,13 +530,13 @@ export default function App() {
         {/* Main Content Area - fills remaining space */}
         <div className="flex-1 flex flex-col lg:flex-row gap-4 min-h-0">
           {/* Process Steps Card - Sidebar */}
-          <ProcessStepsCard 
-            activeTab={tab} 
+          <ProcessStepsCard
+            activeTab={tab}
             onImageClick={handleImageClick}
             currentStep={
-              tab === 'scan' ? scanCurrentStep : 
-              tab === 'assign' ? assignCurrentStep : 
-              tab === 'release' ? releaseCurrentStep : 0
+              tab === 'scan' ? scanCurrentStep :
+                tab === 'assign' ? assignCurrentStep :
+                  tab === 'release' ? releaseCurrentStep : 0
             }
             onStepClick={handleStepClick}
             onResetAll={handleResetAll}
@@ -519,24 +547,31 @@ export default function App() {
             <div className="flex-1 bg-white rounded-lg shadow-lg p-4 flex flex-col justify-center min-h-[calc(100vh-12rem)]">
               <div className="flex-1 flex flex-col justify-center">
                 {tab === "assign" && (
-                  <AssignBinsToJTC 
+                  <AssignBinsToJTC
                     ref={assignBinsRef}
                     currentStep={assignCurrentStep}
                     onStepChange={setAssignCurrentStep}
                   />
                 )}
                 {tab === "scan" && (
-                  <ScanBinItems 
+                  <ScanBinItems2
                     ref={scanBinItemsRef}
                     currentStep={scanCurrentStep}
                     onStepChange={setScanCurrentStep}
                   />
                 )}
                 {tab === "release" && (
-                  <ScanToReleaseBin 
+                  <ScanToReleaseBin
                     ref={scanToReleaseRef}
                     currentStep={releaseCurrentStep}
                     onStepChange={setReleaseCurrentStep}
+                  />
+                )}
+                {tab === "warehouseReturn" && (
+                  <ScanToWarehouseReturn
+                    ref={scanToWarehouseReturnRef}
+                    currentStep={warehouseReturnCurrentStep}
+                    onStepChange={setWarehouseReturnCurrentStep}
                   />
                 )}
                 {tab === "scanComponentWeight" && <ScanComponentWeight />}
@@ -569,8 +604,8 @@ export default function App() {
               </div>
             </div>
             {/* Click outside to close */}
-            <div 
-              className="absolute inset-0 -z-10" 
+            <div
+              className="absolute inset-0 -z-10"
               onClick={() => setModalImg(null)}
             ></div>
           </div>

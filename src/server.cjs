@@ -1,44 +1,38 @@
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
-const axios = require('axios'); // Add this at the top of your file
+const axios = require('axios');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
-
-
-
 
 // Update with your actual connection string or config
 const pool = new Pool({
   connectionString: 'postgres://bky_ejtc:bky_ejtc@43.216.204.154:5432/bky-ejtc'
 });
 
-// Handle the SIGINT signal (Ctrl+C)
+// Handle graceful shutdown
 process.on('SIGINT', () => {
   console.log('Shutting down server...');
-
-  // Close the database connection pool (if applicable)
   pool.end()
     .then(() => {
       console.log('Database connection closed.');
-      // Close the server
       server.close(() => {
         console.log('Server closed.');
-        process.exit(0); // Exit the processx
+        process.exit(0);
       });
     })
     .catch(err => {
       console.error('Error closing database connection:', err);
       server.close(() => {
         console.log('Server closed.');
-        process.exit(1); // Exit with an error code
+        process.exit(1);
       });
     });
 });
 
-// After creating the pool
+// Test DB connection on startup
 pool.connect()
   .then(client => {
     console.log('Connected to PostgreSQL!');
@@ -46,123 +40,228 @@ pool.connect()
   })
   .catch(err => {
     console.error('Failed to connect to PostgreSQL:', err);
-    process.exit(1); // Optional: exit if connection fails
+    process.exit(1);
   });
 
 app.get('/api/ping', (req, res) => {
   res.json({ message: 'pong' });
 });
 
-// POST /api/save-scan-data - Save scanned bin data and set status/location
 app.post('/api/save-scan-data', async (req, res) => {
   const {
     jtc,
     binId,
     components,
     quantities,
-    expectedWeights,
-    actualWeights
+    actualWeights,
+    unitWeights
   } = req.body;
 
-  if (!binId || !components) {
+  console.log('Received POST request for /api/save-scan-data');
+  console.log('Request body:', req.body);
+
+  if (!binId || !components || !Array.isArray(components) || components.length === 0) {
     return res.status(400).json({
       success: false,
       error: 'Bin ID and components are required'
     });
   }
 
+  const client = await pool.connect();
+
   try {
-    // Determine status based on whether JTC is provided
-    const status = jtc ? 'Ready for Release' : 'Pending JTC';
+    await client.query('BEGIN');
 
-    // Prepare component data (up to 4 components)
-    const component1 = components[0] || null;
-    const component2 = components[1] || null;
-    const component3 = components[2] || null;
-    const component4 = components[3] || null;
+    // Fetch current bin status and quantity_check_status
+    const binRes = await client.query(
+      'SELECT status, quantity_check_status FROM jtc_bin_new WHERE bin_id = $1',
+      [binId]
+    );
+    if (binRes.rows.length === 0) {
+      throw new Error('Bin not found');
+    }
+    const { status: currentStatus, quantity_check_status: currentQtyStatus } = binRes.rows[0];
 
-    const quantity1 = quantities ? quantities[0] : null;
-    const quantity2 = quantities ? quantities[1] : null;
-    const quantity3 = quantities ? quantities[2] : null;
-    const quantity4 = quantities ? quantities[3] : null;
+    // Determine if partial update (pending missing) or full overwrite
+    const isPartialUpdate = ['Shortage', 'Excess', 'Pending'].includes(currentQtyStatus);
 
-    const expectedWeight1 = expectedWeights ? expectedWeights[0] : null;
-    const expectedWeight2 = expectedWeights ? expectedWeights[1] : null;
-    const expectedWeight3 = expectedWeights ? expectedWeights[2] : null;
-    const expectedWeight4 = expectedWeights ? expectedWeights[3] : null;
+    // Helper function to process and upsert a component
+    async function upsertComponent(componentId, actualQuantity, actualWeight, unitWeightFromFrontend) {
+      // Fetch expected quantity, require_scale, unit_weight_g from master
+      const expectedRes = await client.query(
+        'SELECT expected_quantity_per_bin, require_scale, unit_weight_g FROM components_master WHERE component_id = $1',
+        [componentId]
+      );
+      if (expectedRes.rows.length === 0) {
+        throw new Error(`Component ${componentId} not found in master list`);
+      }
+      const { expected_quantity_per_bin: expectedQuantity, require_scale, unit_weight_g: masterUnitWeightG } = expectedRes.rows[0];
 
-    const actualWeight1 = actualWeights ? actualWeights[0] : null;
-    const actualWeight2 = actualWeights ? actualWeights[1] : null;
-    const actualWeight3 = actualWeights ? actualWeights[2] : null;
-    const actualWeight4 = actualWeights ? actualWeights[3] : null;
+      // Fetch existing actual_weight, actual_quantity, unit_weight_g from jtc_bin_components (if any)
+      const existingRes = await client.query(
+        'SELECT actual_weight, actual_quantity, unit_weight_g FROM jtc_bin_components WHERE bin_id = $1 AND component_id = $2',
+        [binId, componentId]
+      );
+      const existing = existingRes.rows[0] || {};
 
-    // Insert or update bin data
-    const query = `
-      INSERT INTO jtc_bin (
-        bin_id, jtc, 
-        component_1, component_2, component_3, component_4,
-        quantity_c1, quantity_c2, quantity_c3, quantity_c4,
-        expected_weight_c1, expected_weight_c2, expected_weight_c3, expected_weight_c4,
-        actual_weight_c1, actual_weight_c2, actual_weight_c3, actual_weight_c4,
-        status, location, last_updated
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, NOW())
+      // Use existing values if frontend values are null/undefined in partial update
+      if (isPartialUpdate) {
+        if (actualQuantity == null) actualQuantity = existing.actual_quantity;
+        if (actualWeight == null || actualWeight === 0) actualWeight = existing.actual_weight;
+      }
+
+      let unitWeightG = null;
+
+      if (!require_scale) {
+        // For components that do NOT require scale, use master unit weight
+        unitWeightG = masterUnitWeightG;
+
+        if (actualQuantity == null) {
+          actualQuantity = expectedQuantity;
+        }
+
+        actualWeight = actualQuantity && unitWeightG
+          ? parseFloat(((actualQuantity * unitWeightG) / 1000).toFixed(3))
+          : null;
+
+      } else {
+        // For components that require scale, use unit weight from frontend if provided
+        unitWeightG = (typeof unitWeightFromFrontend === 'number' && unitWeightFromFrontend > 0)
+          ? unitWeightFromFrontend
+          : existing.unit_weight_g || null;
+
+        // Do NOT calculate unitWeightG from actualWeight and actualQuantity anymore
+      }
+
+      // Calculate discrepancy
+      const difference = (actualQuantity || 0) - (expectedQuantity || 0);
+      let discrepancyType = 'OK';
+      if (difference < 0) discrepancyType = 'Shortage';
+      else if (difference > 0) discrepancyType = 'Excess';
+
+      // Upsert component data
+      if (isPartialUpdate) {
+        await client.query(`
+          INSERT INTO jtc_bin_components (
+            bin_id, component_id, actual_weight, actual_quantity, expected_quantity, discrepancy_type, difference, unit_weight_g, recorded_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+          ON CONFLICT (bin_id, component_id) DO UPDATE SET
+            actual_weight = EXCLUDED.actual_weight,
+            actual_quantity = EXCLUDED.actual_quantity,
+            expected_quantity = EXCLUDED.expected_quantity,
+            discrepancy_type = EXCLUDED.discrepancy_type,
+            difference = EXCLUDED.difference,
+            unit_weight_g = EXCLUDED.unit_weight_g,
+            recorded_at = NOW()
+        `, [binId, componentId, actualWeight, actualQuantity, expectedQuantity, discrepancyType, difference, unitWeightG]);
+      } else {
+        await client.query(`
+          INSERT INTO jtc_bin_components (
+            bin_id, component_id, actual_weight, actual_quantity, expected_quantity, discrepancy_type, difference, unit_weight_g, recorded_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+        `, [binId, componentId, actualWeight, actualQuantity, expectedQuantity, discrepancyType, difference, unitWeightG]);
+      }
+
+      // Update unit_weight_g in components_master if changed
+      if (unitWeightG != null) {
+        await client.query(
+          `UPDATE components_master
+     SET unit_weight_g = $1,
+         updated_at = NOW()
+     WHERE component_id = $2
+       AND (unit_weight_g IS NULL OR unit_weight_g <> $1)`,
+          [unitWeightG, componentId]
+        );
+      }
+    }
+
+    // Upsert bin info with new JTC and status (initially)
+    const initialStatus = jtc ? 'Ready for Release' : (currentStatus === 'Pending JTC' ? 'Pending JTC' : currentStatus);
+
+    const upsertBinQuery = `
+      INSERT INTO jtc_bin_new (
+        bin_id, jtc, status, last_updated, created_at
+      ) VALUES ($1::varchar, $2, $3, NOW(), COALESCE(
+        (SELECT created_at FROM jtc_bin_new WHERE bin_id = $1::varchar), NOW()
+      ))
       ON CONFLICT (bin_id) DO UPDATE SET
         jtc = EXCLUDED.jtc,
-        component_1 = EXCLUDED.component_1,
-        component_2 = EXCLUDED.component_2,
-        component_3 = EXCLUDED.component_3,
-        component_4 = EXCLUDED.component_4,
-        quantity_c1 = EXCLUDED.quantity_c1,
-        quantity_c2 = EXCLUDED.quantity_c2,
-        quantity_c3 = EXCLUDED.quantity_c3,
-        quantity_c4 = EXCLUDED.quantity_c4,
-        expected_weight_c1 = EXCLUDED.expected_weight_c1,
-        expected_weight_c2 = EXCLUDED.expected_weight_c2,
-        expected_weight_c3 = EXCLUDED.expected_weight_c3,
-        expected_weight_c4 = EXCLUDED.expected_weight_c4,
-        actual_weight_c1 = EXCLUDED.actual_weight_c1,
-        actual_weight_c2 = EXCLUDED.actual_weight_c2,
-        actual_weight_c3 = EXCLUDED.actual_weight_c3,
-        actual_weight_c4 = EXCLUDED.actual_weight_c4,
         status = EXCLUDED.status,
-        location = EXCLUDED.location,
         last_updated = NOW()
     `;
+    await client.query(upsertBinQuery, [binId, jtc, initialStatus]);
 
-    const params = [
-      binId, jtc,
-      component1, component2, component3, component4,
-      quantity1, quantity2, quantity3, quantity4,
-      expectedWeight1, expectedWeight2, expectedWeight3, expectedWeight4,
-      actualWeight1, actualWeight2, actualWeight3, actualWeight4,
-      status, 'WH1'
-    ];
+    if (!isPartialUpdate) {
+      // Full overwrite: delete existing components first
+      await client.query('DELETE FROM jtc_bin_components WHERE bin_id = $1', [binId]);
+    }
 
-    await pool.query(query, params);
+    // Process each component
+    for (let i = 0; i < components.length; i++) {
+      const componentId = components[i];
+      let actualQuantity = quantities[i] != null ? quantities[i] : null;
+      let actualWeight = actualWeights[i] != null ? actualWeights[i] : null;
+      let unitWeightFromFrontend = unitWeights && unitWeights[i] != null ? unitWeights[i] : null;
+
+      await upsertComponent(componentId, actualQuantity, actualWeight, unitWeightFromFrontend);
+    }
+
+    // Recalculate quantity check status after component updates
+    const compRows = await client.query(
+      'SELECT discrepancy_type FROM jtc_bin_components WHERE bin_id = $1',
+      [binId]
+    );
+
+    let hasShortage = false;
+    let hasExcess = false;
+
+    for (const row of compRows.rows) {
+      if (row.discrepancy_type === 'Shortage') hasShortage = true;
+      else if (row.discrepancy_type === 'Excess') hasExcess = true;
+    }
+
+    let newQuantityCheckStatus = 'Ready';
+    if (hasShortage) newQuantityCheckStatus = 'Shortage';
+    else if (hasExcess) newQuantityCheckStatus = 'Excess';
+
+    // Determine final bin status based on quantity check and JTC presence
+    let finalStatus;
+    if (newQuantityCheckStatus === 'Ready') {
+      finalStatus = jtc ? 'Ready for Release' : 'Pending JTC';
+    } else {
+      finalStatus = 'Pending Refill'; // or 'Pending Correction'
+    }
+
+    // Update bin status and quantity_check_status
+    await client.query(
+      `UPDATE jtc_bin_new SET status = $1, quantity_check_status = $2, last_updated = NOW() WHERE bin_id = $3`,
+      [finalStatus, newQuantityCheckStatus, binId]
+    );
+
+    await client.query('COMMIT');
 
     res.json({
       success: true,
-      message: `Bin ${binId} data saved successfully with status '${status}' and location 'WH1'`,
-      binId: binId,
-      status: status,
-      location: 'WH1'
+      message: `Bin ${binId} data saved successfully with status '${finalStatus}' and quantity check status '${newQuantityCheckStatus}'`,
+      binId,
+      status: finalStatus,
+      quantity_check_status: newQuantityCheckStatus
     });
 
   } catch (error) {
+    await client.query('ROLLBACK');
     console.error('Error saving scan data:', error);
     res.status(500).json({
       success: false,
-      error: 'Database error while saving scan data'
+      error: error.message || 'Database error while saving scan data'
     });
+  } finally {
+    client.release();
   }
 });
-
-// POST /api/assign-bins - Assign bins to JTC (multiple bins)
+// Assign multiple bins to a JTC
 app.post('/api/assign-bins', async (req, res) => {
   const { jtc, bins } = req.body;
-  console.log(jtc);
-  console.log(bins);
-
 
   if (!jtc || !bins || !Array.isArray(bins) || bins.length === 0) {
     return res.status(400).json({
@@ -172,19 +271,13 @@ app.post('/api/assign-bins', async (req, res) => {
   }
 
   try {
-    // First, verify all bins have status "pending JTC"
-    const placeholders = bins.map((_, index) => `$${index + 1}`).join(',');
-    const checkQuery = `
-      SELECT bin_id, status 
-      FROM jtc_bin 
-      WHERE bin_id IN (${placeholders})
-    `;
-
+    // Verify all bins exist
+    const placeholders = bins.map((_, i) => `$${i + 1}`).join(',');
+    const checkQuery = `SELECT bin_id, status FROM jtc_bin_new WHERE bin_id IN (${placeholders})`;
     const checkResult = await pool.query(checkQuery, bins);
 
-    // Check if all bins exist
     if (checkResult.rows.length !== bins.length) {
-      const foundBins = checkResult.rows.map(row => row.bin_id);
+      const foundBins = checkResult.rows.map(r => r.bin_id);
       const missingBins = bins.filter(bin => !foundBins.includes(bin));
       return res.status(404).json({
         success: false,
@@ -192,21 +285,15 @@ app.post('/api/assign-bins', async (req, res) => {
       });
     }
 
-    // Check if all bins have status "pending JTC"
-
-
-
-    // Update bins with JTC assignment and change status to "ready for release"
-    const updatePlaceholders = bins.map((_, index) => `$${index + 2}`).join(',');
+    // Update bins with JTC and status
+    const updatePlaceholders = bins.map((_, i) => `$${i + 2}`).join(',');
     const updateQuery = `
-      UPDATE jtc_bin 
-      SET jtc = $1, status = 'Ready for Release', last_updated = NOW() 
+      UPDATE jtc_bin_new
+      SET jtc = $1, status = 'Ready for Release', last_updated = NOW()
       WHERE bin_id IN (${updatePlaceholders})
     `;
-
     const updateParams = [jtc, ...bins];
     const result = await pool.query(updateQuery, updateParams);
-    console.log(result);
 
     if (result.rowCount === 0) {
       return res.status(500).json({
@@ -216,13 +303,11 @@ app.post('/api/assign-bins', async (req, res) => {
     }
 
     res.json({
-      
       success: true,
       message: `Successfully assigned ${bins.length} bin(s) to JTC ${jtc}`,
-      jtc: jtc,
+      jtc,
       assignedBins: bins
     });
-    console.log(res.json)
 
   } catch (error) {
     console.error('Error assigning bins:', error);
@@ -233,41 +318,7 @@ app.post('/api/assign-bins', async (req, res) => {
   }
 });
 
-// POST /api/assign-bin - Single bin assignment (keeping for backward compatibility)
-app.post('/api/assign-bin', async (req, res) => {
-  const { jtc, bin_id } = req.body;
-  try {
-    // Check if bin exists and has status "pending JTC"
-    const checkResult = await pool.query(
-      'SELECT status FROM jtc_bin WHERE bin_id = $1',
-      [bin_id]
-    );
-
-    if (checkResult.rows.length === 0) {
-      return res.json({ success: false, error: 'Bin not found' });
-    }
-
-    if (checkResult.rows[0].status !== 'Pending JTC') {
-      return res.json({
-        success: false,
-        error: `Bin ${bin_id} is not ready for assignment. Current status: ${checkResult.rows[0].status}`
-      });
-    }
-
-    // Update with JTC and change status
-    await pool.query(
-      `UPDATE jtc_bin 
-       SET jtc = $1, status = 'Ready for Release', last_updated = NOW()
-       WHERE bin_id = $2`,
-      [jtc, bin_id]
-    );
-    res.json({ success: true });
-  } catch (err) {
-    res.json({ success: false, error: err.message });
-  }
-});
-
-// POST /api/release-bins - Release bins and update location to workcell
+// Release bins and update location to workcell
 app.post('/api/release-bins', async (req, res) => {
   const { bins } = req.body;
 
@@ -279,18 +330,12 @@ app.post('/api/release-bins', async (req, res) => {
   }
 
   try {
-    // First, verify all bins have status "ready for release"
-    const placeholders = bins.map((_, index) => `$${index + 1}`).join(',');
-    const checkQuery = `
-      SELECT bin_id, status, wc_id 
-      FROM jtc_bin 
-      WHERE bin_id IN (${placeholders})
-    `;
-
+    const placeholders = bins.map((_, i) => `$${i + 1}`).join(',');
+    const checkQuery = `SELECT bin_id, status, wc_id FROM jtc_bin_new WHERE bin_id IN (${placeholders})`;
     const checkResult = await pool.query(checkQuery, bins);
 
     if (checkResult.rows.length !== bins.length) {
-      const foundBins = checkResult.rows.map(row => row.bin_id);
+      const foundBins = checkResult.rows.map(r => r.bin_id);
       const missingBins = bins.filter(bin => !foundBins.includes(bin));
       return res.status(404).json({
         success: false,
@@ -298,23 +343,34 @@ app.post('/api/release-bins', async (req, res) => {
       });
     }
 
-    const invalidBins = checkResult.rows.filter(row => row.status !== 'Ready for Release');
+    const invalidBins = checkResult.rows.filter(r => r.status !== 'Ready for Release');
     if (invalidBins.length > 0) {
-      const invalidBinIds = invalidBins.map(row => `${row.bin_id} (${row.status})`);
+      const invalidBinIds = invalidBins.map(r => `${r.bin_id} (${r.status})`);
       return res.status(400).json({
         success: false,
         error: `These bins are not ready for release: ${invalidBinIds.join(', ')}. Please assign them to a JTC first.`
       });
     }
 
-    // For each bin, update status to 'released' and set location to wc_id
-    for (const row of checkResult.rows) {
-      const updateQuery = `
-        UPDATE jtc_bin 
-        SET status = 'Released', last_used = NOW(), last_updated = NOW(), location = $1 
-        WHERE bin_id = $2
-      `;
-      await pool.query(updateQuery, [row.wc_id || 'UNKNOWN_WC', row.bin_id]);
+    // Update bins status and location
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      for (const row of checkResult.rows) {
+        const location = row.wc_id || 'UNKNOWN_WC';
+        await client.query(
+          `UPDATE jtc_bin_new SET 
+          status = 'Released',
+           last_used = NOW(), last_updated = NOW(), location = $1 WHERE bin_id = $2`,
+          [location, row.bin_id]
+        );
+      }
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
     }
 
     res.json({
@@ -332,11 +388,10 @@ app.post('/api/release-bins', async (req, res) => {
   }
 });
 
-// POST /api/update-bin-status - Update status for multiple bins
+// Update status for multiple bins
 app.post('/api/update-bin-status', async (req, res) => {
   const { bins, status } = req.body;
 
-  // Validate input
   if (!bins || !Array.isArray(bins) || bins.length === 0) {
     return res.status(400).json({
       success: false,
@@ -351,8 +406,7 @@ app.post('/api/update-bin-status', async (req, res) => {
     });
   }
 
-  // Validate status values
-  const validStatuses = ['Pending JTC', 'Ready for Release', 'Released'];
+  const validStatuses = ['Pending JTC', 'Ready for Release', 'Released', 'Pending Refill'];
   if (!validStatuses.includes(status)) {
     return res.status(400).json({
       success: false,
@@ -361,14 +415,12 @@ app.post('/api/update-bin-status', async (req, res) => {
   }
 
   try {
-    // Create placeholders for the IN clause
-    const placeholders = bins.map((_, index) => `$${index + 2}`).join(',');
+    const placeholders = bins.map((_, i) => `$${i + 2}`).join(',');
     const query = `
-      UPDATE  jtc_bin
-      SET status = $1, last_updated = NOW() 
+      UPDATE jtc_bin_new
+      SET status = $1, last_updated = NOW()
       WHERE bin_id IN (${placeholders})
     `;
-
     const params = [status, ...bins];
     const result = await pool.query(query, params);
 
@@ -395,128 +447,56 @@ app.post('/api/update-bin-status', async (req, res) => {
   }
 });
 
-// Legacy endpoint - keeping for backward compatibility
-app.post('/api/scan-bin', async (req, res) => {
-  const { bin_id, components, actualWeights } = req.body;
-  try {
-    await pool.query(
-      `INSERT INTO jtc_bin (
-          bin_id, component_1, component_2, component_3, component_4,
-          actual_weight_c1, actual_weight_c2, actual_weight_c3, actual_weight_c4, 
-          status, location, last_updated
-        )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending JTC', 'WH1', NOW())
-       ON CONFLICT (bin_id) DO UPDATE
-         SET component_1 = EXCLUDED.component_1,
-             component_2 = EXCLUDED.component_2,
-             component_3 = EXCLUDED.component_3,
-             component_4 = EXCLUDED.component_4,
-             actual_weight_c1 = EXCLUDED.actual_weight_c1,
-             actual_weight_c2 = EXCLUDED.actual_weight_c2,
-             actual_weight_c3 = EXCLUDED.actual_weight_c3,
-             actual_weight_c4 = EXCLUDED.actual_weight_c4,
-             status = 'pending JTC',
-             location = 'WH1',
-             last_updated = NOW()`,
-      [
-        bin_id,
-        components[0], components[1], components[2], components[3],
-        actualWeights[0], actualWeights[1], actualWeights[2], actualWeights[3]
-      ]
-    );
-    res.json({ success: true });
-  } catch (err) {
-    res.json({ success: false, error: err.message });
-  }
-});
-
-// Get per unit weight for a component
-app.get('/api/get-per-unit-weight', async (req, res) => {
-  const { component } = req.query;
-  console.log('Received get-per-unit-weight for:', component);
-  if (!component) {
-    return res.json({ success: false, error: 'Component ID is required' });
-  }
+app.get('/api/bin-info/:binId', async (req, res) => {
+  const { binId } = req.params;
+  console.log('Received binId:', binId);
 
   try {
-    const result = await pool.query(
-      `SELECT weight, quantity_per_bulk 
-       FROM component_weight_records 
-       WHERE component_id = $1 
-       ORDER BY recorded_at DESC 
-       LIMIT 1`,
-      [component]
-    );
-
-    if (result.rows.length > 0) {
-      const { weight, quantity_per_bulk } = result.rows[0];
-      // Calculate per unit weight (total weight / quantity per bulk)
-      const perUnitWeight = parseFloat(weight) / parseInt(quantity_per_bulk);
-
-      res.json({
-        success: true,
-        perUnitWeight: perUnitWeight,
-        totalWeight: parseFloat(weight),
-        quantityPerBulk: parseInt(quantity_per_bulk)
-      });
-    } else {
-      res.json({
-        success: false,
-        error: 'No weight record found for this component'
-      });
+    const binResult = await pool.query('SELECT * FROM jtc_bin_new WHERE bin_id = $1', [binId]);
+    if (binResult.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Bin not found' });
     }
-  } catch (err) {
-    res.json({ success: false, error: err.message });
-  }
-});
+    const bin = binResult.rows[0];
 
-// Record component weight and quantity per bulk
-app.post('/api/record-component-weight', async (req, res) => {
-  const { componentId, weight, quantity } = req.body;
-  try {
-    // Don't specify 'id' - let PostgreSQL auto-generate it
-    const result = await pool.query(
-      `INSERT INTO component_weight_records (component_id, weight, quantity_per_bulk, recorded_at)
-       VALUES ($1, $2, $3, CURRENT_TIMESTAMP) RETURNING id`,
-      [componentId, weight, quantity]
+    const componentsResult = await pool.query(
+      `SELECT 
+         c.component_id, 
+         c.actual_weight, 
+         c.actual_quantity, 
+         cm.expected_quantity_per_bin, 
+         cm.component_name, 
+         cm.require_scale,
+         CASE 
+           WHEN c.actual_weight IS NOT NULL AND c.actual_quantity IS NOT NULL AND c.actual_quantity > 0 
+           THEN ROUND((c.actual_weight * 1000) / c.actual_quantity, 2)
+           ELSE cm.unit_weight_g
+         END AS unit_weight_g,
+         c.discrepancy_type, 
+         c.difference, 
+         c.recorded_at
+       FROM jtc_bin_components c
+       JOIN components_master cm ON c.component_id = cm.component_id
+       WHERE c.bin_id = $1
+       ORDER BY c.id`,
+      [binId]
     );
 
     res.json({
       success: true,
-      id: result.rows[0].id,
-      message: "Component weight recorded successfully"
+      bin,
+      components: componentsResult.rows
     });
-  } catch (err) {
-    console.error('Database error:', err);
-    res.json({ success: false, error: err.message });
-  }
-});
-
-// GET /api/bin-info/:binId
-app.get('/api/bin-info/:binId', async (req, res) => {
-  try {
-    const { binId } = req.params;
-    const query = `
-      SELECT *
-      FROM jtc_bin 
-      WHERE bin_id = $1
-    `;
-    const result = await pool.query(query, [binId]);
-    console.log('Query result:', result.rows);
-    if (result.rows.length === 0) {
-      return res.status(404).json({ success: false, error: 'Bin not found' });
-    }
-    res.json({ success: true, bin: result.rows[0] });
   } catch (error) {
+    console.error('Failed to fetch bin information:', error);
     res.status(500).json({ success: false, error: 'Failed to fetch bin information' });
   }
 });
 
-// GET /api/jtc-info/:barcodeId
+// Get JTC info by barcode
 app.get('/api/jtc-info/:barcodeId', async (req, res) => {
   const { barcodeId } = req.params;
   const query = `SELECT * FROM jtc WHERE "jtc_barcodeId" = $1 LIMIT 1`;
-  console.log(barcodeId);
+
   try {
     const result = await pool.query(query, [barcodeId]);
 
@@ -526,23 +506,18 @@ app.get('/api/jtc-info/:barcodeId', async (req, res) => {
     res.json({ success: true, jtc: result.rows[0] });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ uccess: false, error: 'Server error' });
+    res.status(500).json({ success: false, error: 'Server error' });
   }
 });
 
-
-
-const path = require('path');
-const { exec } = require('child_process');
-
+// Print work order label
 app.post('/api/print-work-order-label', async (req, res) => {
   const labelData = req.body;
   const tspl = generateWorkOrderTSPL(labelData);
 
-  // Send TSPL to local print agent on the Windows PC (replace with your agent's IP!)
   try {
     const response = await axios.post(
-      'http://10.0.120.115:9999/print-label', // e.g. http://192.168.1.55:9999/print-label
+      'http://10.0.120.115:9999/print-label',
       { tspl },
       { timeout: 5000 }
     );
@@ -557,7 +532,184 @@ app.post('/api/print-work-order-label', async (req, res) => {
   }
 });
 
+app.get('/api/component-master/:componentId', async (req, res) => {
+  const { componentId } = req.params;
+  const { binId } = req.query; // optional binId
+
+  try {
+    // Fetch master data
+    const masterResult = await pool.query(
+      `SELECT 
+         expected_quantity_per_bin, 
+         component_name,
+         unit_weight_g,
+         require_scale
+       FROM components_master 
+       WHERE component_id = $1`,
+      [componentId]
+    );
+
+    if (masterResult.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Component not found in master list' });
+    }
+
+    const masterData = masterResult.rows[0];
+
+    // Initialize response data with master data
+    const responseData = {
+      success: true,
+      component_id: componentId,
+      component_name: masterData.component_name,
+      expected_quantity_per_bin: masterData.expected_quantity_per_bin,
+      unit_weight_g: masterData.unit_weight_g,
+      require_scale: masterData.require_scale,
+    };
+
+    // If binId provided, fetch last saved scale info for this bin-component
+    if (binId) {
+      const binCompResult = await pool.query(
+        `SELECT actual_quantity, actual_weight, unit_weight_g
+         FROM jtc_bin_components
+         WHERE bin_id = $1 AND component_id = $2
+         ORDER BY recorded_at DESC
+         LIMIT 1`,
+        [binId, componentId]
+      );
+
+      if (binCompResult.rows.length > 0) {
+        const binCompData = binCompResult.rows[0];
+        responseData.last_actual_quantity = binCompData.actual_quantity;
+        responseData.last_actual_weight = binCompData.actual_weight;
+        responseData.last_unit_weight_g = binCompData.unit_weight_g;
+      }
+    }
+
+    res.json(responseData);
+
+  } catch (err) {
+    console.error('Error fetching component master:', err);
+    res.status(500).json({ success: false, error: 'Server error' });
+  }
+});
+
+
+// Get JTC info by jtc_id (integer)
+app.get('/api/jtc-info-by-id/:jtcId', async (req, res) => {
+  const { jtcId } = req.params;
+  const query = `SELECT * FROM jtc WHERE jtc_id = $1 LIMIT 1`;
+  console.log('getting jtc info:', jtcId);
+
+  try {
+    const result = await pool.query(query, [jtcId]);
+    console.log('Query:', query);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'JTC not found' });
+    }
+    res.json({ success: true, jtc: result.rows[0] });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, error: 'Server error' });
+  }
+});
+app.get('/api/jtc-assigned-bins-count/:jtcId', async (req, res) => {
+  const { jtcId } = req.params;
+
+  try {
+    const result = await pool.query(
+      'SELECT COUNT(*) AS count FROM jtc_bin_new WHERE jtc = $1',
+      [jtcId]
+    );
+
+    const count = parseInt(result.rows[0].count, 10);
+
+    res.json({ success: true, jtcId, assignedBinsCount: count });
+  } catch (error) {
+    console.error('Error fetching assigned bins count:', error);
+    res.status(500).json({ success: false, error: 'Server error' });
+  }
+});
+
+// Get BOM list by jtc_RevId (string or bigint)
+app.get('/api/jtc-bom/:jtcRevId', async (req, res) => {
+  const { jtcRevId } = req.params;
+  console.log('getting jtc bom rev id:', jtcRevId);
+
+  try {
+    const query = `
+      SELECT jtc_material AS component_id, "jtc_QuantityPerItem" AS quantity_per_item
+      FROM jtc_bom_insyi
+      WHERE jtc_flowrevid = $1
+      ORDER BY id
+    `;
+    const result = await pool.query(query, [jtcRevId]);
+    console.log('Query:', query);
+    console.log('result:', result.rows);
+
+    res.json({ success: true, bom: result.rows });
+  } catch (err) {
+    console.error('Error fetching BOM list:', err);
+    res.status(500).json({ success: false, error: 'Server error fetching BOM list' });
+  }
+});
+
+// Return bins to warehouse: update location, clear JTC, reset quantities
+app.post('/api/return-bins-to-warehouse', async (req, res) => {
+  const { bins } = req.body;
+
+  if (!Array.isArray(bins) || bins.length === 0) {
+    return res.status(400).json({ success: false, error: 'Bins array is required and must not be empty' });
+  }
+
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    for (const binId of bins) {
+      // 1. Update bin location to warehouse (adjust location string as needed)
+      // 2. Clear JTC binding (set jtc to null)
+      // 3. Reset component quantities and weights to zero in jtc_bin_components
+      // 4. Update bin status to 'Returned to Warehouse' or similar
+
+      await client.query(
+        `UPDATE jtc_bin_new
+         SET location = $1,
+             jtc = NULL,
+             status = $2,
+             last_updated = NOW()
+             quantity_check_status = 'unchhecked',
+         WHERE bin_id = $3`,
+        ['WAREHOUSE', 'Returned to Warehouse', binId]
+      );
+
+      await client.query(
+        `UPDATE jtc_bin_components
+         SET actual_quantity = 0,
+             actual_weight = 0,
+             discrepancy_type = NULL,
+             difference = NULL,
+             recorded_at = NOW()
+         WHERE bin_id = $1`,
+        [binId]
+      );
+    }
+
+    await client.query('COMMIT');
+
+    res.json({ success: true, message: `Successfully returned ${bins.length} bin(s) to warehouse.` });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error returning bins to warehouse:', error);
+    res.status(500).json({ success: false, error: 'Failed to return bins to warehouse' });
+  } finally {
+    client.release();
+  }
+});
+
+
 function generateWorkOrderTSPL({
+  coNumber = '',
   woNumber = '',
   partName = '',
   dateIssue = '',
@@ -566,14 +718,12 @@ function generateWorkOrderTSPL({
   empNo = '',
   qty = '',
   remarks = '',
-  jtc_barcodeId = ''   // ⬅️ 新增参数
+  jtc_barcodeId = ''
 }) {
-  // Format date to DD/MM/YYYY
   const formattedDate = dateIssue
     ? new Date(dateIssue).toLocaleDateString("en-GB")
     : '';
 
-  // Prepare barcode content with *j prefix
   const barcodeContent = `*j${jtc_barcodeId}`;
 
   return `
@@ -601,7 +751,7 @@ BAR 10,600,630,3
 
 ; -------- LABELS & VALUES --------
 TEXT 20,90,"1",0,1,1,"W.O. NO.:"
-TEXT 20,120,"2",0,1,1,"${woNumber}"
+TEXT 20,120,"2",0,1,1,"${coNumber}"
 TEXT 210,90,"1",0,1,1,"PART NAME:"
 TEXT 210,120,"2",0,1,1,"${partName}"
 
@@ -626,6 +776,5 @@ BARCODE 330,430,"128",80,1,0,2,2,"${barcodeContent}"
 PRINT 1,1
   `;
 }
-console.log('End of file reached');
 
 const server = app.listen(9090, () => console.log('Server running on port 9090'));

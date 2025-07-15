@@ -57,34 +57,58 @@ const AssignBinsToJTC = forwardRef(({ currentStep, onStepChange }, ref) => {
   }, [step, scannedBins.length]);
 
   // --- FETCH BIN COMPONENTS ---
-  const fetchBinComponents = async (binId) => {
+  const fetchBinComponents = async (binId, force = false) => {
     setLoadingComponents((prev) => ({ ...prev, [binId]: true }));
     try {
       const response = await axios.get(`/api/bin-info/${binId}`);
-      const binData = response.data.bin;
+      const binData = response.data?.bin;
 
-      if (binData.status === "Pending JTC") {
-        // OK to add
-      } else if (binData.status === "Ready for Release") {
-        setAssignedJtcForBin(binData.jtc);   // <-- Save assigned JTC ID!
-
-        setBinToConfirmAdd(binId);
-
+      if (!binData) {
+        setMessage(`❌ No data returned for bin ${binId}`);
+        setShowMessageModal(true);
         return false;
-      } else {
+      }
+
+      // Handle bin status
+      if (binData.status === "Pending JTC") {
+        // OK to proceed
+      } else if (binData.status === "Ready for Release" && !force) {
+        setAssignedJtcForBin(binData.jtc || "Unknown");
+        setBinToConfirmAdd(binId);
+        return false;
+      } else if (!force) {
         setMessage(
-          `Bin ${binId} is not ready for assignment (current status: "${binData.status}"). Please scan this bin in the "Scan Bin Items" tab first.`
+          `❌ Bin ${binId} is not ready for assignment (status: "${binData.status}"). Please scan it in "Scan Bin Items" tab first.`
         );
         setShowMessageModal(true);
         return false;
       }
 
-      const components = [
-        { id: binData.component_1, quantity: binData.quantity_c1 },
-        { id: binData.component_2, quantity: binData.quantity_c2 },
-        { id: binData.component_3, quantity: binData.quantity_c3 },
-        { id: binData.component_4, quantity: binData.quantity_c4 },
-      ].filter((c) => c.id);
+      // Map components from new structure
+      const componentsRaw = response.data.components || [];
+
+      // Quantity check validation
+      const invalidComponents = componentsRaw.filter(c => {
+        // You can customize this condition as needed
+        // For example, check if actual_quantity !== expected_quantity_per_bin
+        return c.actual_quantity !== c.expected_quantity_per_bin;
+      });
+
+      if (invalidComponents.length > 0) {
+        setMessage(
+          `❌ Bin ${binId} has components with quantity mismatch. Cannot assign to JTC.`
+        );
+        setShowMessageModal(true);
+        return false;
+      }
+
+      // Map components for UI
+      const components = componentsRaw
+        .map(c => ({
+          id: c.component_id,
+          quantity: c.actual_quantity,
+        }))
+        .filter(c => typeof c.id === "string" && c.id.trim() !== "");
 
       setBinComponents((prev) => ({
         ...prev,
@@ -93,9 +117,11 @@ const AssignBinsToJTC = forwardRef(({ currentStep, onStepChange }, ref) => {
           remark: binData.remark ? binData.remark.trim() : null,
         },
       }));
+
       return true;
     } catch (error) {
-      setMessage(`Error fetching bin info for ${binId}.`);
+      console.error("Error fetching bin info:", error);
+      setMessage(`❌ Error fetching bin info for ${binId}.`);
       setShowMessageModal(true);
       setBinComponents((prev) => ({
         ...prev,
@@ -106,7 +132,6 @@ const AssignBinsToJTC = forwardRef(({ currentStep, onStepChange }, ref) => {
       setLoadingComponents((prev) => ({ ...prev, [binId]: false }));
     }
   };
-
   const handleJtcScan = async (barcode) => {
     if (!barcode.trim()) return;
 
@@ -150,10 +175,20 @@ const AssignBinsToJTC = forwardRef(({ currentStep, onStepChange }, ref) => {
     }
   };
 
-  // --- MODAL BIN ADD ---
   const confirmAddBin = async () => {
     if (!binToConfirmAdd) return;
-    setScannedBins((prev) => [...prev, binToConfirmAdd]);
+
+    setLoading(true);
+    const ok = await fetchBinComponents(binToConfirmAdd, true);
+    setLoading(false);
+
+    if (ok) {
+      setScannedBins((prev) => [...prev, binToConfirmAdd]);
+    } else {
+      setMessage(`Failed to add bin ${binToConfirmAdd}.`);
+      setShowMessageModal(true);
+    }
+
     setBinToConfirmAdd(null);
     setShowMessageModal(false);
   };
@@ -215,6 +250,7 @@ const AssignBinsToJTC = forwardRef(({ currentStep, onStepChange }, ref) => {
         // Prepare data to send to print label (use correct field names from your backend)
 
         const labelData = {
+          coNumber: jtcInfo.jtc_CONumber,
           woNumber: jtcInfo.jtc_id,
           partName: jtcInfo.jtc_PartNumber || jtcInfo.jtc_PartNo || "",
           dateIssue: jtcInfo.jtc_createdAt || "",
@@ -271,26 +307,26 @@ const AssignBinsToJTC = forwardRef(({ currentStep, onStepChange }, ref) => {
   };
 
   const resetForNextJTC = () => {
-  setStep(0);
-  setJtcId("");
-  setJtcInfo(null);
-  setScannedBins([]);
-  setBinComponents({});
-  setLoadingComponents({});
-  setBinToRemove(null);
-  setShowRemoveConfirmModal(false);
-  setBinToConfirmAdd(null);
-  if (onStepChange) onStepChange(0);
-};
+    setStep(0);
+    setJtcId("");
+    setJtcInfo(null);
+    setScannedBins([]);
+    setBinComponents({});
+    setLoadingComponents({});
+    setBinToRemove(null);
+    setShowRemoveConfirmModal(false);
+    setBinToConfirmAdd(null);
+    if (onStepChange) onStepChange(0);
+  };
 
   const closeMessageModal = () => {
     setShowMessageModal(false);
-      // ✅ Only reset when it's a success message
+    // ✅ Only reset when it's a success message
     if (message.startsWith("Successfully assigned")) {
       resetForNextJTC();
     }
     setMessage("");
- 
+
 
   };
 
@@ -298,7 +334,7 @@ const AssignBinsToJTC = forwardRef(({ currentStep, onStepChange }, ref) => {
   const handleKeyDown = (e, type) => {
 
     if (e.key === "Enter") {
-          e.preventDefault(); // ⛔ 阻止默认行为（避免触发表单提交或按钮点击）
+      e.preventDefault(); // ⛔ 阻止默认行为（避免触发表单提交或按钮点击）
 
       if (type === "jtc") {
         handleJtcScan(e.target.value);
@@ -445,8 +481,8 @@ const AssignBinsToJTC = forwardRef(({ currentStep, onStepChange }, ref) => {
                   onClick={handleConfirmAssignment}
                   disabled={loading}
                   className={`px-8 py-4 rounded-xl font-bold text-base transition-colors whitespace-nowrap shadow-md ${loading
-                      ? "bg-gray-300 text-gray-500 cursor-not-allowed"
-                      : "bg-green-600 text-white hover:bg-green-700"
+                    ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                    : "bg-green-600 text-white hover:bg-green-700"
                     }`}
                 >
                   {loading ? "Saving..." : "✅ Confirm & Print"}
@@ -492,7 +528,7 @@ const AssignBinsToJTC = forwardRef(({ currentStep, onStepChange }, ref) => {
                 </div>
               </div>
             )}
-            
+
           </div>
         )}
       </div>
