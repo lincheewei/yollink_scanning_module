@@ -1,19 +1,18 @@
 @echo off
-cd /d "%~dp0"
+set LOG=%TEMP%\yollink-startup.log
+echo [%date% %time%] Script started > "%LOG%"
+cd /d "%~dp0" || echo [%date% %time%] Failed to cd >> "%LOG%"
 
-:: Check if package.json exists (confirm we're in the right folder)
 if not exist package.json (
-    echo ERROR: Not in project folder. package.json not found.
-    pause
+    echo [%date% %time%] ERROR: package.json not found >> "%LOG%"
     exit /b
 )
 
-echo [Yollink] Starting dev server...
+echo [%date% %time%] Starting npm dev >> "%LOG%"
 start /min cmd /k "npm run dev"
 
-:: Wait for the dev server to be ready
 timeout /t 8 >nul
-
-:: Launch Chrome in kiosk mode
+echo [%date% %time%] Launching Chrome >> "%LOG%"
 start "" "C:\Program Files\Google\Chrome\Application\chrome.exe" --kiosk "http://localhost:5173"
 
+echo [%date% %time%] Script ended >> "%LOG%"
