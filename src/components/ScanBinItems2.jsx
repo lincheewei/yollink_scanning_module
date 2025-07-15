@@ -721,26 +721,40 @@ const fetchScaleReading = async (componentId) => {
 
 
   const resetAfterSuccess = () => {
-    setBinId("");
-    setScannedComponents([]);
-    setComponentData({});
-    setJtcId("");
-    setJtcInfo(null);
-    setMessage("");
-    setShowMessageModal(false);
-    if (onStepChange) onStepChange(0);
+  setBinId("");
+  setScannedComponents([]);
+  setComponentData(prev => {
+    // Keep only expected_quantity_per_bin and component_id for each component
+    const preservedData = {};
+    Object.entries(prev).forEach(([compId, data]) => {
+      if (data.expected_quantity_per_bin != null) {
+        preservedData[compId] = {
+          component_id: compId,
+          expected_quantity_per_bin: data.expected_quantity_per_bin,
+          // Optionally keep component_name if you have it
+          component_name: data.component_name || null,
+          // Clear dynamic fields
+          pcs: null,
+          net_kg: null,
+          unit_weight_g: null,
+          error: null,
+          difference: null,
+          discrepancy_type: null,
+          loading: false,
+          needsScaleReading: data.needsScaleReading || false,
+          require_scale: data.require_scale || false,
+        };
+      }
+    });
+    return preservedData;
+  });
+  setJtcId("");
+  setJtcInfo(null);
+  setMessage("");
+  setShowMessageModal(false);
+  if (onStepChange) onStepChange(0);
   };
 
-  const handleReset = () => {
-    setBinId("");
-    setScannedComponents([]);
-    setComponentData({});
-    setJtcId("");
-    setJtcInfo(null);
-    setMessage("");
-    setShowMessageModal(false);
-    if (onStepChange) onStepChange(0);
-  };
 
   const closeMessageModal = () => {
     setShowMessageModal(false);
