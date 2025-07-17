@@ -47,6 +47,58 @@ app.get('/api/ping', (req, res) => {
   res.json({ message: 'pong' });
 });
 
+// Create a new bin if it doesn't exist
+app.post('/api/create-bin', async (req, res) => {
+  const { binId } = req.body;
+
+  if (!binId || typeof binId !== 'string' || binId.trim() === '') {
+    return res.status(400).json({
+      success: false,
+      error: 'binId is required and must be a non-empty string'
+    });
+  }
+
+  const normalizedBinId = binId.trim().toUpperCase();
+
+  const client = await pool.connect();
+
+  try {
+    // Check if bin already exists
+    const existingBin = await client.query(
+      'SELECT bin_id FROM jtc_bin_new WHERE bin_id = $1',
+      [normalizedBinId]
+    );
+
+    if (existingBin.rows.length > 0) {
+      // Bin already exists, no need to create
+      return res.json({
+        success: true,
+        message: `Bin ${normalizedBinId} already exists`
+      });
+    }
+
+    // Insert new bin with default status and timestamps
+    await client.query(
+      `INSERT INTO jtc_bin_new (bin_id, status, quantity_check_status, created_at, last_updated)
+       VALUES ($1, 'Pending JTC', 'unchecked', NOW(), NOW())`,
+      [normalizedBinId]
+    );
+
+    res.json({
+      success: true,
+      message: `Bin ${normalizedBinId} created successfully`
+    });
+  } catch (error) {
+    console.error('Error creating bin:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Database error while creating bin'
+    });
+  } finally {
+    client.release();
+  }
+});
+
 app.post('/api/save-scan-data', async (req, res) => {
   const {
     jtc,
@@ -650,6 +702,25 @@ app.get('/api/jtc-bom/:jtcRevId', async (req, res) => {
   } catch (err) {
     console.error('Error fetching BOM list:', err);
     res.status(500).json({ success: false, error: 'Server error fetching BOM list' });
+  }
+});
+
+// Get all bins for a given JTC ID
+app.get('/api/bins-by-jtc/:jtcId', async (req, res) => {
+  const { jtcId } = req.params;
+
+  try {
+    const result = await pool.query(
+      'SELECT bin_id FROM jtc_bin_new WHERE jtc = $1',
+      [jtcId]
+    );
+
+    const bins = result.rows.map(row => row.bin_id);
+
+    res.json({ success: true, bins });
+  } catch (error) {
+    console.error('Error fetching bins by JTC:', error);
+    res.status(500).json({ success: false, error: 'Internal server error' });
   }
 });
 

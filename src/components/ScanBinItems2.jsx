@@ -103,27 +103,20 @@ const ScanBinItems2 = forwardRef(({ currentStep, onStepChange }, ref) => {
     try {
       const res = await axios.get(`/api/bin-info/${normalized}`);
 
-      if (!res.data.success) {
-        setMessage("❌ No components found for this bin.");
-        setShowMessageModal(true);
-        return;
-      }
-
+      // If API returns success false or no components, treat as empty bin (existing)
       const componentsFromApi = res.data.components || [];
       const binInfo = res.data.bin || {};
 
-      if (componentsFromApi.length === 0) {
+      // Allow empty components array (valid bin with no components)
+      if (!Array.isArray(componentsFromApi)) {
         setMessage("❌ No components found for this bin.");
         setShowMessageModal(true);
         return;
       }
 
-      console.log("Bin Info:", binInfo);
-      console.log("Components from API:", componentsFromApi);
-
       const componentIds = componentsFromApi.map(c => c.component_id);
 
-      // Determine scan mode based on quantity_check_status
+      // Your existing logic to build newComponentData
       const partialScanNeeded = ["Shortage", "Excess", "Pending"].includes(binInfo.quantity_check_status);
       const quantitiesOk = binInfo.quantity_check_status === "Ready";
 
@@ -132,15 +125,12 @@ const ScanBinItems2 = forwardRef(({ currentStep, onStepChange }, ref) => {
         const hasSavedQty = quantitiesOk && c.actual_quantity != null;
         const isPartialScan = partialScanNeeded && c.actual_quantity != null;
 
-        // FIXED: For non-scale components, use last saved actual quantity if available on partial scan
         const pcsValue = c.require_scale
           ? (hasSavedQty || isPartialScan ? c.actual_quantity : null)
           : (hasSavedQty || isPartialScan ? c.actual_quantity : c.expected_quantity_per_bin);
 
-        // unit weight from DB or fallback
         const unitWeightGValue = c.unit_weight_g ?? (componentData[c.component_id]?.unit_weight_g || null);
 
-        // net_kg: for no-scale, use DB value if exists, else calculate fallback
         let netKgValue = null;
         if (!c.require_scale) {
           if (hasSavedQty || isPartialScan) {
@@ -158,7 +148,6 @@ const ScanBinItems2 = forwardRef(({ currentStep, onStepChange }, ref) => {
           netKgValue = hasSavedQty || isPartialScan ? c.actual_weight : null;
         }
 
-        // Calculate difference and discrepancy_type for no-scale components
         let differenceValue = c.difference ?? null;
         let discrepancyTypeValue = (hasSavedQty || isPartialScan) ? (c.discrepancy_type || "OK") : null;
 
@@ -183,100 +172,126 @@ const ScanBinItems2 = forwardRef(({ currentStep, onStepChange }, ref) => {
         };
       });
 
-      console.log("New Component Data:", newComponentData);
-
       setScannedComponents(componentIds);
       setComponentData(newComponentData);
 
-      // Skip directly to JTC binding step if bin is Pending JTC and quantities are OK
       if (binInfo.status === "Pending JTC" && binInfo.quantity_check_status === "Ready") {
         if (onStepChange) onStepChange(2);
         return;
       }
 
-      // Otherwise proceed to component scan step
       if (onStepChange) onStepChange(1);
+
     } catch (err) {
-      console.error("❌ Failed to fetch components for bin:", err);
-      setMessage("❌ Error fetching bin components.");
-      setShowMessageModal(true);
+      // Handle 404 error - bin not found, treat as new bin
+      if (err.response && err.response.status === 404) {
+        setMessage(`Bin "${normalized}" not found. Creating new bin.`);
+        setShowMessageModal(true);
+
+        // Clear components and data for new bin
+        setScannedComponents([]);
+        setComponentData({});
+
+        // Proceed to component scan step to allow adding new components
+        if (onStepChange) onStepChange(1);
+
+      } else {
+        console.error("❌ Failed to fetch components for bin:", err);
+        setMessage("❌ Error fetching bin components.");
+        setShowMessageModal(true);
+      }
     }
   };
 
   // Handle scanning a new component manually
-  const handleComponentScan = async (componentIdRaw) => {
-    const componentId = componentIdRaw.trim().toUpperCase();
-    if (!componentId) return;
+const handleComponentScan = async (componentIdRaw) => {
+  const componentId = componentIdRaw.trim().toUpperCase();
+  if (!componentId) return;
 
-    if (scannedComponents.includes(componentId)) {
-      setMessage(`Component ${componentId} already scanned.`);
-      setShowMessageModal(true);
-      return;
-    }
+  if (scannedComponents.includes(componentId)) {
+    setMessage(`Component ${componentId} already scanned.`);
+    setShowMessageModal(true);
+    return;
+  }
 
-    setScannedComponents(prev => [...prev, componentId]);
+  setScannedComponents(prev => [...prev, componentId]);
 
-    try {
-      // Pass current binId to get last saved scale info for this bin-component
-      const res = await axios.get(`/api/component-master/${componentId}`, {
-        params: { binId }
-      });
+  try {
+    // Pass current binId to get last saved scale info for this bin-component
+    const res = await axios.get(`/api/component-master/${componentId}`, {
+      params: { binId }
+    });
 
-      if (res.data.success) {
-        const masterData = res.data;
-        console.log("Master Data with scale info:", masterData);
+    if (res.data.success) {
+      const c = res.data;
 
-        const requireScale = masterData.require_scale ?? true;
+      const requireScale = c.require_scale ?? true;
 
-        // Use last saved scale info if available
-        const lastPcs = masterData.last_actual_quantity != null ? masterData.last_actual_quantity : (requireScale ? null : masterData.expected_quantity_per_bin);
-        const lastUnitWeightG = masterData.last_unit_weight_g ?? masterData.unit_weight_g ?? null;
+      // Determine pcs value
+      // For no scale: use last_actual_quantity if available, else expected_quantity_per_bin
+      // For scale: use last_actual_quantity if available, else null (needs scale reading)
+      const hasSavedQty = c.last_actual_quantity != null;
+      const pcsValue = requireScale
+        ? (hasSavedQty ? c.last_actual_quantity : null)
+        : (hasSavedQty ? c.last_actual_quantity : c.expected_quantity_per_bin);
 
-        // Calculate net_kg fallback if no last saved weight
-        const lastNetKg = masterData.last_actual_weight != null
-          ? masterData.last_actual_weight
-          : (!requireScale && lastPcs && lastUnitWeightG)
-            ? parseFloat(((lastPcs * lastUnitWeightG) / 1000).toFixed(3))
-            : (requireScale ? null : 0);
+      // Unit weight fallback
+      const unitWeightGValue = c.last_unit_weight_g ?? c.unit_weight_g ?? null;
 
-        setComponentData(prev => ({
-          ...prev,
-          [componentId]: {
-            expected_quantity_per_bin: masterData.expected_quantity_per_bin,
-            component_id: masterData.component_id,
-            unit_weight_g: lastUnitWeightG,
-            pcs: lastPcs,
-            net_kg: lastNetKg,
-            loading: false,
-            error: null,
-            difference: 0,
-            discrepancy_type: null,
-            needsScaleReading: requireScale,
-            require_scale: masterData.require_scale,
-          }
-        }));
+      // Calculate net_kg
+      let netKgValue = null;
+      if (!requireScale) {
+        if (hasSavedQty) {
+          netKgValue = c.last_actual_weight != null
+            ? c.last_actual_weight
+            : (pcsValue && unitWeightGValue)
+              ? parseFloat(((pcsValue * unitWeightGValue) / 1000).toFixed(3))
+              : 0;
+        } else {
+          netKgValue = (pcsValue && unitWeightGValue)
+            ? parseFloat(((pcsValue * unitWeightGValue) / 1000).toFixed(3))
+            : 0;
+        }
       } else {
-        // fallback if no master data
-        setComponentData(prev => ({
-          ...prev,
-          [componentId]: {
-            expected_quantity_per_bin: null,
-            component_name: null,
-            unit_weight_g: null,
-            pcs: null,
-            net_kg: null,
-            loading: false,
-            error: null,
-            difference: null,
-            discrepancy_type: null,
-            needsScaleReading: true,
-            require_scale: true,
-          }
-        }));
-        setMessage(`Component ${componentId} not found in master data.`);
-        setShowMessageModal(true);
+        netKgValue = hasSavedQty ? c.last_actual_weight : null;
       }
-    } catch (error) {
+
+      // Calculate difference and discrepancy_type
+      let differenceValue = null;
+      let discrepancyTypeValue = null;
+
+      if (!requireScale) {
+        differenceValue = pcsValue != null && c.expected_quantity_per_bin != null
+          ? pcsValue - c.expected_quantity_per_bin
+          : null;
+        discrepancyTypeValue = differenceValue === 0 ? "OK" : (differenceValue < 0 ? "Shortage" : "Excess");
+      } else {
+        // For scale required, if pcsValue is null, discrepancy_type is null (needs reading)
+        discrepancyTypeValue = pcsValue != null ? "OK" : null;
+        differenceValue = pcsValue != null && c.expected_quantity_per_bin != null
+          ? pcsValue - c.expected_quantity_per_bin
+          : null;
+      }
+
+      setComponentData(prev => ({
+        ...prev,
+        [componentId]: {
+          ...prev[componentId],
+          expected_quantity_per_bin: c.expected_quantity_per_bin,
+          component_id: c.component_id,
+          pcs: pcsValue,
+          net_kg: netKgValue,
+          unit_weight_g: unitWeightGValue,
+          discrepancy_type: discrepancyTypeValue,
+          difference: differenceValue,
+          loading: false,
+          error: null,
+          needsScaleReading: requireScale && pcsValue == null,
+          require_scale: requireScale,
+        }
+      }));
+    } else {
+      // fallback if no master data
       setComponentData(prev => ({
         ...prev,
         [componentId]: {
@@ -293,20 +308,41 @@ const ScanBinItems2 = forwardRef(({ currentStep, onStepChange }, ref) => {
           require_scale: true,
         }
       }));
-      setMessage(`Error fetching data for component ${componentId}.`);
+      setMessage(`Component ${componentId} not found in master data.`);
       setShowMessageModal(true);
     }
+  } catch (error) {
+    setComponentData(prev => ({
+      ...prev,
+      [componentId]: {
+        expected_quantity_per_bin: null,
+        component_name: null,
+        unit_weight_g: null,
+        pcs: null,
+        net_kg: null,
+        loading: false,
+        error: null,
+        difference: null,
+        discrepancy_type: null,
+        needsScaleReading: true,
+        require_scale: true,
+      }
+    }));
+    setMessage(`Error fetching data for component ${componentId}.`);
+    setShowMessageModal(true);
+  }
 
-    if (onStepChange) onStepChange(1);
-  };
+  if (onStepChange) onStepChange(1);
+};
 
-  // Dummy scale data for testing
+
+  const useDummyScaleData = true; // Set to false to use real scale
+
   const getDummyScaleData = (expectedQuantity) => {
     // Simulate success 80% of the time
     const isSuccess = Math.random() < 0.8;
 
     if (!isSuccess) {
-      // Simulate failure
       return {
         success: false,
         net_kg: null,
@@ -316,13 +352,8 @@ const ScanBinItems2 = forwardRef(({ currentStep, onStepChange }, ref) => {
       };
     }
 
-    // Simulate pcs around expectedQuantity ±5 (min 1)
     const pcs = Math.max(1, expectedQuantity + Math.floor((Math.random() * 11) - 5));
-
-    // Simulate net_kg around 100 ±10
     const net_kg = parseFloat((100 + (Math.random() * 20 - 10)).toFixed(2));
-
-    // Simulate unit_weight_g around net_kg * 1000 / pcs (approx)
     const unit_weight_g = parseFloat(((net_kg * 1000) / pcs).toFixed(2));
 
     return {
@@ -334,57 +365,7 @@ const ScanBinItems2 = forwardRef(({ currentStep, onStepChange }, ref) => {
     };
   };
 
-
-  const adjustQuantity = (componentId, delta) => {
-    setComponentData((prev) => {
-      const currentQty = prev[componentId]?.pcs ?? 0;
-      const newQty = Math.max(0, currentQty + delta);
-      const expectedQty = prev[componentId]?.expected_quantity_per_bin ?? 0;
-      const difference = newQty - expectedQty;
-      const discrepancy_type = difference === 0 ? "OK" : difference < 0 ? "Shortage" : "Excess";
-
-      return {
-        ...prev,
-        [componentId]: {
-          ...prev[componentId],
-          pcs: newQty,
-          difference,
-          discrepancy_type,
-          error: null,
-        },
-      };
-    });
-
-    // Reset mismatch count if you use that feature
-    setMismatchCounts((prev) => ({ ...prev, [componentId]: 0 }));
-  };
-
-  const manualQuantityChange = (componentId, value) => {
-    const num = Number(value);
-    if (isNaN(num) || num < 0) return; // ignore invalid input
-
-    setComponentData((prev) => {
-      const expectedQty = prev[componentId]?.expected_quantity_per_bin ?? 0;
-      const difference = num - expectedQty;
-      const discrepancy_type = difference === 0 ? "OK" : difference < 0 ? "Shortage" : "Excess";
-
-      return {
-        ...prev,
-        [componentId]: {
-          ...prev[componentId],
-          pcs: num,
-          difference,
-          discrepancy_type,
-          error: null,
-        },
-      };
-    });
-
-    setMismatchCounts((prev) => ({ ...prev, [componentId]: 0 }));
-  };
-
   const fetchScaleReading = async (componentId) => {
-    // Set loading state
     setComponentData(prev => ({
       ...prev,
       [componentId]: {
@@ -395,30 +376,36 @@ const ScanBinItems2 = forwardRef(({ currentStep, onStepChange }, ref) => {
     }));
 
     try {
-      const response = await axios.get("http://localhost:8000/get_weight");
-      console.log("Scale response:", response.data);
+      let scaleData;
 
-      if (response.status === 204 || !response.data) {
-        // No scale data case — preserve previous values
-        setComponentData(prev => ({
-          ...prev,
-          [componentId]: {
-            ...(prev[componentId] || {}),
-            loading: false,
-            net_kg: null,
-            pcs: null,
-            unit_weight_g: null,
-            timestamp: null,
-            serial_no: null,
-            error: "No scale data available",
-            difference: null,
-            discrepancy_type: null,
-          }
-        }));
-        return;
+      if (useDummyScaleData) {
+        // Use dummy data for dev
+        const expectedQty = componentData[componentId]?.expected_quantity_per_bin || 50;
+        scaleData = getDummyScaleData(expectedQty);
+        if (!scaleData.success) throw new Error(scaleData.error);
+      } else {
+        // Real scale API call
+        const response = await axios.get("http://localhost:8000/get_weight");
+        if (response.status === 204 || !response.data) {
+          setComponentData(prev => ({
+            ...prev,
+            [componentId]: {
+              ...(prev[componentId] || {}),
+              loading: false,
+              net_kg: null,
+              pcs: null,
+              unit_weight_g: null,
+              timestamp: null,
+              serial_no: null,
+              error: "No scale data available",
+              difference: null,
+              discrepancy_type: null,
+            }
+          }));
+          return;
+        }
+        scaleData = response.data;
       }
-
-      const scaleData = response.data;
 
       const validNetKg = isPositiveNumber(scaleData.net_kg) ? scaleData.net_kg : null;
       const validPcs = isPositiveNumber(scaleData.pcs) ? scaleData.pcs : null;
@@ -426,11 +413,9 @@ const ScanBinItems2 = forwardRef(({ currentStep, onStepChange }, ref) => {
 
       const expectedQty = componentData[componentId]?.expected_quantity_per_bin || 50;
 
-      // Calculate discrepancy
       const difference = validPcs !== null ? validPcs - expectedQty : null;
       const discrepancy_type = difference === 0 ? "OK" : (difference < 0 ? "Shortage" : "Excess");
 
-      // Update mismatch count
       setMismatchCounts(prev => {
         const currentCount = prev[componentId] || 0;
         return discrepancy_type === "OK"
@@ -438,7 +423,6 @@ const ScanBinItems2 = forwardRef(({ currentStep, onStepChange }, ref) => {
           : { ...prev, [componentId]: currentCount + 1 };
       });
 
-      // Set updated component data with preserved values
       setComponentData(prev => ({
         ...prev,
         [componentId]: {
@@ -466,14 +450,13 @@ const ScanBinItems2 = forwardRef(({ currentStep, onStepChange }, ref) => {
           unit_weight_g: null,
           timestamp: null,
           serial_no: null,
-          error: "Failed to get scale reading",
+          error: error.message || "Failed to get scale reading",
           difference: null,
           discrepancy_type: null,
         }
       }));
     }
   };
-
   // Check if quantity matches expected quantity exactly
   const isQuantityCorrect = (componentId) => {
     const data = componentData[componentId];
@@ -638,6 +621,26 @@ const ScanBinItems2 = forwardRef(({ currentStep, onStepChange }, ref) => {
     if (onStepChange) onStepChange(2);
   };
 
+  // Helper to create bin if it doesn't exist
+  const createBinIfNotExists = async (binId) => {
+    try {
+      // Call your backend API to create a new bin
+      const response = await axios.post('/api/create-bin', { binId });
+
+      if (response.data.success) {
+        return true;
+      } else {
+        setMessage(response.data.error || "Failed to create new bin.");
+        setShowMessageModal(true);
+        return false;
+      }
+    } catch (err) {
+      setMessage(`Failed to create new bin: ${err.response?.data?.error || err.message}`);
+      setShowMessageModal(true);
+      return false;
+    }
+  };
+
   const handleConfirmSave = async () => {
     if (!binId || scannedComponents.length === 0) {
       setMessage("Please scan bin and at least one component before saving.");
@@ -657,47 +660,43 @@ const ScanBinItems2 = forwardRef(({ currentStep, onStepChange }, ref) => {
       return;
     }
 
-    // Build all arrays consistently with .map()
-    const quantities = scannedComponents.map(compId => {
-      const comp = componentData[compId] || {};
-      return typeof comp.pcs === "number" ? comp.pcs : 0;
-    });
-
-    const expectedWeights = scannedComponents.map(compId => {
-      const comp = componentData[compId] || {};
-      return (typeof comp.expected_quantity_per_bin === "number" && typeof comp.unit_weight_g === "number")
-        ? (comp.expected_quantity_per_bin * comp.unit_weight_g) / 1000
-        : 0;
-    });
-
-    const actualWeights = scannedComponents.map(compId => {
-      const comp = componentData[compId] || {};
-      if (comp.net_kg && comp.net_kg > 0) return comp.net_kg;
-      // fallback: send last known weight or 0 if none
-      return comp.net_kg_last_known || 0;
-    });
-
-    const unitWeights = scannedComponents.map(compId => {
-      const comp = componentData[compId] || {};
-      return typeof comp.unit_weight_g === "number" ? comp.unit_weight_g : 0;
-    });
-
     setLoading(true);
     setMessage("Saving bin information...");
     setShowMessageModal(true);
 
     try {
+      // Create bin first if new
+      const binCreated = await createBinIfNotExists(binId);
+      if (!binCreated) {
+        setLoading(false);
+        return;
+      }
+
+      // Prepare payload for saving scan data
       const payload = {
         binId,
         jtc: jtcInfo?.jtc_id || null,
         components: scannedComponents,
-        quantities,
-        expectedWeights,
-        actualWeights,
-        unitWeights,
+        quantities: scannedComponents.map(compId => {
+          const comp = componentData[compId] || {};
+          return typeof comp.pcs === "number" ? comp.pcs : 0;
+        }),
+        expectedWeights: scannedComponents.map(compId => {
+          const comp = componentData[compId] || {};
+          return (typeof comp.expected_quantity_per_bin === "number" && typeof comp.unit_weight_g === "number")
+            ? (comp.expected_quantity_per_bin * comp.unit_weight_g) / 1000
+            : 0;
+        }),
+        actualWeights: scannedComponents.map(compId => {
+          const comp = componentData[compId] || {};
+          if (comp.net_kg && comp.net_kg > 0) return comp.net_kg;
+          return comp.net_kg_last_known || 0;
+        }),
+        unitWeights: scannedComponents.map(compId => {
+          const comp = componentData[compId] || {};
+          return typeof comp.unit_weight_g === "number" ? comp.unit_weight_g : 0;
+        }),
       };
-
-      console.log("Payload:", payload);
 
       const response = await axios.post("/api/save-scan-data", payload);
 
@@ -722,7 +721,6 @@ const ScanBinItems2 = forwardRef(({ currentStep, onStepChange }, ref) => {
       setLoading(false);
     }
   };
-
 
   const resetAfterSuccess = () => {
     setBinId("");
@@ -782,8 +780,7 @@ const ScanBinItems2 = forwardRef(({ currentStep, onStepChange }, ref) => {
     focusActiveInput();
   };
 
-  console.log("Ready count:", readyCount);
-  console.log("Component data:", componentData);
+
 
   return (
     <div>
@@ -1115,73 +1112,73 @@ const ScanBinItems2 = forwardRef(({ currentStep, onStepChange }, ref) => {
                                 <span className="font-semibold">{data.unit_weight_g != null ? `${data.unit_weight_g}g` : "N/A"}</span>
                               </div>
 
-                            {/* Quantity with conditional +/- buttons or plain text */}
-<div className="flex justify-between items-center">
-  <span className="text-gray-600 font-medium">Quantity:</span>
-  {!data.require_scale ? (
-    // Always show adjustment buttons if no scale required
-    <div className="flex items-center space-x-2 max-w-xs">
-      <button
-        type="button"
-        onClick={() => adjustQuantity(component, -1)}
-        disabled={(data.pcs ?? 0) <= 0}
-        className="px-2 py-1 bg-gray-300 rounded disabled:opacity-50"
-        title="Decrease quantity"
-      >
-        -
-      </button>
-      <input
-        type="number"
-        min="0"
-        value={data.pcs ?? ""}
-        onChange={(e) => manualQuantityChange(component, e.target.value)}
-        className="w-16 text-center border rounded"
-        aria-label={`Quantity for component ${component}`}
-      />
-      <button
-        type="button"
-        onClick={() => adjustQuantity(component, 1)}
-        className="px-2 py-1 bg-gray-300 rounded"
-        title="Increase quantity"
-      >
-        +
-      </button>
-    </div>
-  ) : (
-    // For scale required components, show adjustment buttons only if quantity incorrect
-    (data.discrepancy_type === "Shortage" || data.discrepancy_type === "Excess") ? (
-      <div className="flex items-center space-x-2 max-w-xs">
-        <button
-          type="button"
-          onClick={() => adjustQuantity(component, -1)}
-          disabled={(data.pcs ?? 0) <= 0}
-          className="px-2 py-1 bg-gray-300 rounded disabled:opacity-50"
-          title="Decrease quantity"
-        >
-          -
-        </button>
-        <input
-          type="number"
-          min="0"
-          value={data.pcs ?? ""}
-          onChange={(e) => manualQuantityChange(component, e.target.value)}
-          className="w-16 text-center border rounded"
-          aria-label={`Quantity for component ${component}`}
-        />
-        <button
-          type="button"
-          onClick={() => adjustQuantity(component, 1)}
-          className="px-2 py-1 bg-gray-300 rounded"
-          title="Increase quantity"
-        >
-          +
-        </button>
-      </div>
-    ) : (
-      <span className="font-semibold">{data.pcs != null ? `${data.pcs} pcs` : "N/A"}</span>
-    )
-  )}
-</div>
+                              {/* Quantity with conditional +/- buttons or plain text */}
+                              <div className="flex justify-between items-center">
+                                <span className="text-gray-600 font-medium">Quantity:</span>
+                                {!data.require_scale ? (
+                                  // Always show adjustment buttons if no scale required
+                                  <div className="flex items-center space-x-2 max-w-xs">
+                                    <button
+                                      type="button"
+                                      onClick={() => adjustQuantity(component, -1)}
+                                      disabled={(data.pcs ?? 0) <= 0}
+                                      className="px-2 py-1 bg-gray-300 rounded disabled:opacity-50"
+                                      title="Decrease quantity"
+                                    >
+                                      -
+                                    </button>
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      value={data.pcs ?? ""}
+                                      onChange={(e) => manualQuantityChange(component, e.target.value)}
+                                      className="w-16 text-center border rounded"
+                                      aria-label={`Quantity for component ${component}`}
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() => adjustQuantity(component, 1)}
+                                      className="px-2 py-1 bg-gray-300 rounded"
+                                      title="Increase quantity"
+                                    >
+                                      +
+                                    </button>
+                                  </div>
+                                ) : (
+                                  // For scale required components, show adjustment buttons only if quantity incorrect
+                                  (data.discrepancy_type === "Shortage" || data.discrepancy_type === "Excess") ? (
+                                    <div className="flex items-center space-x-2 max-w-xs">
+                                      <button
+                                        type="button"
+                                        onClick={() => adjustQuantity(component, -1)}
+                                        disabled={(data.pcs ?? 0) <= 0}
+                                        className="px-2 py-1 bg-gray-300 rounded disabled:opacity-50"
+                                        title="Decrease quantity"
+                                      >
+                                        -
+                                      </button>
+                                      <input
+                                        type="number"
+                                        min="0"
+                                        value={data.pcs ?? ""}
+                                        onChange={(e) => manualQuantityChange(component, e.target.value)}
+                                        className="w-16 text-center border rounded"
+                                        aria-label={`Quantity for component ${component}`}
+                                      />
+                                      <button
+                                        type="button"
+                                        onClick={() => adjustQuantity(component, 1)}
+                                        className="px-2 py-1 bg-gray-300 rounded"
+                                        title="Increase quantity"
+                                      >
+                                        +
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <span className="font-semibold">{data.pcs != null ? `${data.pcs} pcs` : "N/A"}</span>
+                                  )
+                                )}
+                              </div>
 
                               <div className="flex justify-between">
                                 <span className="text-gray-600 font-medium">Expected Quantity:</span>
