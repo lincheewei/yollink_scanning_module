@@ -53,9 +53,35 @@ const ScanToReleaseBin = forwardRef(({ onStepChange }, ref) => {
     },
   }));
 
+
+  // Function to focus the bin input
+  const focusInput = () => {
+    if (binInputRef.current) {
+      binInputRef.current.focus();
+    }
+  };
+
   useEffect(() => {
-    binInputRef.current?.focus();
-  }, [scannedBins.length]);
+    // Focus input on mount
+    focusInput();
+
+    // Refocus input on clicks outside buttons and modals
+    const handleGlobalClick = (e) => {
+      const tag = e.target.tagName.toLowerCase();
+      const isButton = tag === "button" || e.target.closest("button");
+      const isModal = e.target.closest(".modal") || e.target.classList.contains("modal");
+
+      if (!isButton && !isModal) {
+        focusInput();
+      }
+    };
+
+    document.addEventListener("click", handleGlobalClick);
+
+    return () => {
+      document.removeEventListener("click", handleGlobalClick);
+    };
+  }, []);
 
   useEffect(() => {
     if (!currentJtcId) {

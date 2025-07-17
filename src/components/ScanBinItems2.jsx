@@ -336,7 +336,7 @@ const handleComponentScan = async (componentIdRaw) => {
 };
 
 
-  const useDummyScaleData = true; // Set to false to use real scale
+  const useDummyScaleData = false; // Set to false to use real scale
 
   const getDummyScaleData = (expectedQuantity) => {
     // Simulate success 80% of the time
