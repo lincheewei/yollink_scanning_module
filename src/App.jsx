@@ -7,7 +7,7 @@ import ScanBinItems from "./components/ScanBinItems";
 import ScanToReleaseBin from "./components/ScanToReleaseBin";
 import ScanBinItems2 from "./components/ScanBinItems2";
 import ScanToWarehouseReturn from "./components/ScanToWarehouseReturn";
-
+import WarehouseBinMap from './components/WarehouseBinMap';
 import { Buffer } from "buffer";
 window.Buffer = window.Buffer || Buffer;
 
@@ -514,7 +514,9 @@ export default function App() {
     { key: "assign", label: "Assign Bins to JTC" },
     { key: "scan", label: "Scan Bin Items" },
     { key: "release", label: "Warehouse to Production" },
-    { key: "warehouseReturn", label: "Production to Warehouse" },  // <-- new tab
+    { key: "warehouseReturn", label: "Production to Warehouse" }, 
+      { key: "warehouseMap", label: "Warehouse Bin Map" }, // ✅ 新加项
+ // <-- new tab
   ];
 
   return (
@@ -575,6 +577,9 @@ export default function App() {
                   />
                 )}
                 {tab === "scanComponentWeight" && <ScanComponentWeight />}
+                {tab === "warehouseMap" && (
+  <WarehouseBinMap />
+)}
               </div>
             </div>
           </div>

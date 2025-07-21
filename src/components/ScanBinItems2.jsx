@@ -571,7 +571,7 @@ const handleComponentScan = async (componentIdRaw) => {
         jtc_barcodeId: jtcInfo.jtc_barcodeId || "",
       };
 
-      await fetch('/api/print-work-order-label', {
+      await fetch('/api/print-work-order-label-hprt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(labelData)

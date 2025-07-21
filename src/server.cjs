@@ -47,6 +47,39 @@ app.get('/api/ping', (req, res) => {
   res.json({ message: 'pong' });
 });
 
+app.get('/api/bins', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT * FROM jtc_bin_new`
+    );
+    res.json({ success: true, bins: result.rows });
+  } catch (err) {
+    console.error('Error fetching bins:', err);
+    res.status(500).json({ success: false, error: 'Database error' });
+  }
+});
+
+app.post('/api/bins/:binId/status', async (req, res) => {
+  const { binId } = req.params;
+  const { status } = req.body;
+  if (!status) {
+    return res.status(400).json({ success: false, error: 'Status is required' });
+  }
+  try {
+    const result = await pool.query(
+      'UPDATE jtc_bin_new SET status = $1, last_updated = NOW() WHERE bin_id = $2',
+      [status, binId]
+    );
+    if (result.rowCount === 0) {
+      return res.status(404).json({ success: false, error: 'Bin not found' });
+    }
+    res.json({ success: true, message: `Bin ${binId} status updated to ${status}` });
+  } catch (err) {
+    console.error('Error updating bin status:', err);
+    res.status(500).json({ success: false, error: 'Database error' });
+  }
+});
+
 // Create a new bin if it doesn't exist
 app.post('/api/create-bin', async (req, res) => {
   const { binId } = req.body;
@@ -563,26 +596,7 @@ app.get('/api/jtc-info/:barcodeId', async (req, res) => {
 });
 
 // Print work order label
-app.post('/api/print-work-order-label', async (req, res) => {
-  const labelData = req.body;
-  const tspl = generateWorkOrderTSPL(labelData);
 
-  try {
-    const response = await axios.post(
-      'http://localhost:9999/print-label',
-      { tspl },
-      { timeout: 5000 }
-    );
-    if (response.data && response.data.success) {
-      return res.json({ success: true, message: 'Label sent to printer.' });
-    } else {
-      return res.status(500).json({ success: false, error: 'Print agent error.' });
-    }
-  } catch (err) {
-    console.error('Error sending label to print agent:', err);
-    return res.status(500).json({ success: false, error: 'Print agent unreachable or error.' });
-  }
-});
 
 app.get('/api/component-master/:componentId', async (req, res) => {
   const { componentId } = req.params;
@@ -778,6 +792,26 @@ app.post('/api/return-bins-to-warehouse', async (req, res) => {
   }
 });
 
+app.post('/api/print-work-order-label', async (req, res) => {
+  const labelData = req.body;
+  const tspl = generateWorkOrderTSPL(labelData);
+
+  try {
+    const response = await axios.post(
+      'http://localhost:9999/print-label',
+      { tspl },
+      { timeout: 5000 }
+    );
+    if (response.data && response.data.success) {
+      return res.json({ success: true, message: 'Label sent to printer.' });
+    } else {
+      return res.status(500).json({ success: false, error: 'Print agent error.' });
+    }
+  } catch (err) {
+    console.error('Error sending label to print agent:', err);
+    return res.status(500).json({ success: false, error: 'Print agent unreachable or error.' });
+  }
+});
 
 function generateWorkOrderTSPL({
   coNumber = '',
@@ -848,4 +882,63 @@ PRINT 1,1
   `;
 }
 
+
+app.post('/api/print-work-order-label-hprt', async (req, res) => {
+  const labelData = req.body;
+  try {
+    const response = await axios.post('http://10.0.120.187:9999/print-label', {
+      printerType: 'hprt',
+      labelData: labelData
+    });
+
+    if (response.data && response.data.success) {
+      return res.json({ success: true, message: 'Label sent to printer.' });
+    } else {
+      return res.status(500).json({ success: false, error: 'Print agent error.' });
+    }
+  } catch (err) {
+    console.error('Error sending label to print agent:', err);
+    return res.status(500).json({ success: false, error: 'Print agent unreachable or error.' });
+  }
+});
+
+function generateEscposLabel({
+  coNumber = '',
+  woNumber = '',
+  partName = '',
+  dateIssue = '',
+  stockCode = '',
+  processCode = '',
+  empNo = '',
+  qty = '',
+  remarks = '',
+  jtc_barcodeId = ''
+}) {
+  const ESC = '\x1B';
+  const GS = '\x1D';
+  const formattedDate = dateIssue ? new Date(dateIssue).toLocaleDateString("en-GB") : '';
+  const barcode = `*j${jtc_barcodeId}`;
+
+  return (
+    ESC + '@' +
+    ESC + '!' + '\x38' + // double height & width
+    ESC + 'a' + '\x01' + // center align
+    'WORK ORDER LABEL\n\n' +
+    ESC + 'a' + '\x00' + // left align
+    `W.O. NO.: ${coNumber}\n` +
+    `PART NAME: ${partName}\n\n` +
+    `DATE ISSUE: ${formattedDate}\n` +
+    `STOCK CODE: ${stockCode}\n` +
+    `PROCESS CODE/NO.: ${processCode}\n\n` +
+    `EMP. NO.: ${empNo}\n` +
+    `QTY.: ${qty}\n\n` +
+    `REMARKS: ${remarks}\n\n` +
+    GS + 'h' + '\x50' +
+    GS + 'w' + '\x02' +
+    GS + 'H' + '\x02' +
+    GS + 'k' + '\x49' + String.fromCharCode(barcode.length) + barcode +
+    '\n\n\n' +
+    GS + 'V' + '\x01' // full cut
+  );
+}
 const server = app.listen(9090, () => console.log('Server running on port 9090'));
